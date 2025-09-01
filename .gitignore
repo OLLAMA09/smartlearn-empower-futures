@@ -9,3 +9,6 @@ logs
 .env.development.local
 .env.production.local
 .env.test.local
+
+# Local Netlify folder
+.netlify

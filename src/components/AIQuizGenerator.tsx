@@ -6,7 +6,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Slider } from "@/components/ui/slider";
 import { Quiz, QuizQuestion, QuizSubmission, LecturerPromptConfig } from "@/types";
 import { quizService } from "@/services/quizService";
-import { Loader2, Award, CheckCircle, X, Settings } from "lucide-react";
+import { TranslationService } from '@/services/translationService';
+import { Loader2, Award, CheckCircle, X, Settings, Globe } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { Separator } from "./ui/separator";
@@ -84,6 +85,7 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
     explanations: Record<string, string>;
     correctAnswers: Record<string, string>;
     userAnswers: Record<string, string>;
+    // Translation functionality removed
     isNewHighScore?: boolean;
     previousHighScore?: number;
   } | null>(null);
@@ -96,6 +98,7 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
   });
   const [editablePrompt, setEditablePrompt] = useState<string>(defaultEditablePrompt);
   const [showPromptSettings, setShowPromptSettings] = useState(false);
+  // Translation functionality removed
   
   // Generate the AI quiz
   const generateQuiz = async () => {
@@ -135,10 +138,10 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
         customPrompt,
         temperature
       );
-      
+
+      // Store the English version first
       setQuiz(result.quiz);
       setQuizResultId(result.quizResultId);
-      // No scenario text needed now as we're focusing on course content directly
       setAnswers(new Array(result.quiz.questions.length).fill(-1));
       setCurrentQuestionIndex(0);
       
@@ -148,6 +151,8 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
           ? "Your AI quiz has been created using custom lecturer parameters."
           : "Your AI quiz has been created based on the course content.",
       });
+      
+      // Translation functionality removed
     } catch (error) {
       console.error("Error generating AI quiz:", error);
       toast({
@@ -264,17 +269,86 @@ Make sure to create varied questions covering different sections of the content.
     setEditablePrompt(defaultEditablePrompt);
   }, []);
 
+  const [isTranslating, setIsTranslating] = useState(false);
+  const translationService = new TranslationService();
+
+  const translateQuiz = async () => {
+    if (!quiz) return;
+    
+    setIsTranslating(true);
+    try {
+      const translatedQuestions = await Promise.all(
+        quiz.questions.map(async (question) => {
+          const translatedQuestion = await translationService.translateText(question.question);
+          const translatedOptions = await Promise.all(
+            question.options.map(async (option) => 
+              await translationService.translateText(option)
+            )
+          );
+          const translatedExplanation = question.explanation 
+            ? await translationService.translateText(question.explanation)
+            : undefined;
+          
+          return {
+            ...question,
+            question: translatedQuestion,
+            options: translatedOptions,
+            explanation: translatedExplanation
+          };
+        })
+      );
+
+      setQuiz({
+        ...quiz,
+        title: await translationService.translateText(quiz.title),
+        questions: translatedQuestions
+      });
+      
+      toast({
+        title: "Quiz Translated",
+        description: "The quiz has been translated to Zulu",
+      });
+    } catch (error) {
+      console.error('Translation error:', error);
+      toast({
+        title: "Translation Failed",
+        description: "Failed to translate the quiz. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
   const currentQuestion = quiz?.questions?.[currentQuestionIndex];
   const isAnswered = answers[currentQuestionIndex] !== undefined && answers[currentQuestionIndex] >= 0;
   const allQuestionsAnswered = quiz?.questions && answers.every(a => a >= 0);
   
   return (
     <Card className="max-w-4xl mx-auto">
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          <Award className="h-5 w-5 text-yellow-500" />
-          {quiz ? quiz.title : `Content Quiz for ${courseTitle}`}
-        </CardTitle>
+      <CardHeader className="space-y-2">
+        <div className="flex justify-between items-start gap-4">
+          <CardTitle className="flex items-center gap-2">
+            <Award className="h-5 w-5 text-yellow-500" />
+            {quiz ? quiz.title : `Content Quiz for ${courseTitle}`}
+          </CardTitle>
+          {quiz && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={translateQuiz}
+              disabled={isTranslating}
+              className="flex items-center gap-2"
+            >
+              {isTranslating ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Globe className="h-4 w-4" />
+              )}
+              {isTranslating ? "Translating..." : "Translate to Zulu"}
+            </Button>
+          )}
+        </div>
         <CardDescription>
           {quiz 
             ? "Answer all questions to test your understanding of the course material" 

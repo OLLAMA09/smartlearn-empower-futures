@@ -1,0 +1,39 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+  functions = "netlify/functions"
+
+[dev]
+  command = "npm run dev"
+  port = 3000
+  targetPort = 8080
+  publish = "dist"
+  framework = "vite"
+  functionsPort = 9999
+
+[functions]
+  node_bundler = "esbuild"
+  external_node_modules = ["node-fetch"]
+
+[[redirects]]
+  from = "/api/*"
+  to = "/.netlify/functions/:splat"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
+
+[build.environment]
+  NODE_VERSION = "18"
+
+[functions.openai-proxy]
+  included_files = ["netlify/functions/**"]
+  memory = 1024
+  timeout = 30
+
+[functions.azure-translate]
+  included_files = ["netlify/functions/**"]
+  memory = 256
+  timeout = 10

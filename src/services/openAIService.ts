@@ -1,3 +1,5 @@
+import { TranslationService } from './translationService';
+
 // Message interface for OpenAI API
 interface Message {
   role: 'system' | 'user' | 'assistant';
@@ -8,9 +10,11 @@ class OpenAIService {
   // private apiKey: string; // No longer needed in frontend
   private model: string;
   private isConfigured: boolean = false;
+  private translationService: TranslationService;
 
   constructor() {
     this.model = import.meta.env.VITE_OPENAI_MODEL || 'gpt-4o-mini';
+    this.translationService = new TranslationService();
     // Debug log to verify configuration
     console.log('OpenAI configuration:');
     console.log('MODEL:', this.model);
@@ -60,11 +64,14 @@ class OpenAIService {
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+        const errorData = await response.json().catch(() => null);
+        console.error('OpenAI Proxy Error Details:', errorData);
+        throw new Error(`HTTP error! status: ${response.status}, details: ${JSON.stringify(errorData)}`);
       }
 
       const data = await response.json();
       if (data.error) {
+        console.error('OpenAI API Error:', data.error);
         throw new Error(data.error);
       }
       const generatedText = data.choices[0].message.content;
