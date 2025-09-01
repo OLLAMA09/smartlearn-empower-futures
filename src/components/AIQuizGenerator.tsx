@@ -270,6 +270,8 @@ Make sure to create varied questions covering different sections of the content.
   }, []);
 
   const [isTranslating, setIsTranslating] = useState(false);
+  const [currentLanguage, setCurrentLanguage] = useState<'en'|'zu'>('en');
+  const [originalQuiz, setOriginalQuiz] = useState<Quiz | null>(null);
   const translationService = new TranslationService();
 
   const translateQuiz = async () => {
@@ -277,43 +279,62 @@ Make sure to create varied questions covering different sections of the content.
     
     setIsTranslating(true);
     try {
-      const translatedQuestions = await Promise.all(
-        quiz.questions.map(async (question) => {
-          const translatedQuestion = await translationService.translateText(question.question);
-          const translatedOptions = await Promise.all(
-            question.options.map(async (option) => 
-              await translationService.translateText(option)
-            )
-          );
-          const translatedExplanation = question.explanation 
-            ? await translationService.translateText(question.explanation)
-            : undefined;
-          
-          return {
-            ...question,
-            question: translatedQuestion,
-            options: translatedOptions,
-            explanation: translatedExplanation
-          };
-        })
-      );
+      // Store original English version if not stored yet
+      if (currentLanguage === 'en' && !originalQuiz) {
+        setOriginalQuiz(quiz);
+      }
 
-      setQuiz({
-        ...quiz,
-        title: await translationService.translateText(quiz.title),
-        questions: translatedQuestions
-      });
-      
-      toast({
-        title: "Quiz Translated",
-        description: "The quiz has been translated to Zulu",
-      });
+      if (currentLanguage === 'en') {
+        // Translate to Zulu
+        const translatedQuestions = await Promise.all(
+          quiz.questions.map(async (question) => {
+            const translatedQuestion = await translationService.translateText(question.question, 'zu');
+            const translatedOptions = await Promise.all(
+              question.options.map(async (option) => 
+                await translationService.translateText(option, 'zu')
+              )
+            );
+            const translatedExplanation = question.explanation 
+              ? await translationService.translateText(question.explanation, 'zu')
+              : undefined;
+            
+            return {
+              ...question,
+              question: translatedQuestion,
+              options: translatedOptions,
+              explanation: translatedExplanation
+            };
+          })
+        );
+
+        const translatedTitle = await translationService.translateText(quiz.title, 'zu');
+        setQuiz({
+          ...quiz,
+          title: translatedTitle,
+          questions: translatedQuestions
+        });
+        setCurrentLanguage('zu');
+        
+        toast({
+          title: "Quiz Translated",
+          description: "The quiz has been translated to Zulu"
+        });
+      } else if (originalQuiz) {
+        // Revert to English
+        setQuiz(originalQuiz);
+        setCurrentLanguage('en');
+        
+        toast({
+          title: "Quiz Language Changed",
+          description: "The quiz has been restored to English"
+        });
+      }
     } catch (error) {
       console.error('Translation error:', error);
       toast({
         title: "Translation Failed",
-        description: "Failed to translate the quiz. Please try again.",
-        variant: "destructive",
+        description: "Failed to change the quiz language. Please try again.",
+        variant: "destructive"
       });
     } finally {
       setIsTranslating(false);
@@ -345,7 +366,11 @@ Make sure to create varied questions covering different sections of the content.
               ) : (
                 <Globe className="h-4 w-4" />
               )}
-              {isTranslating ? "Translating..." : "Translate to Zulu"}
+              {isTranslating 
+                ? "Translating..." 
+                : currentLanguage === 'en' 
+                  ? "Translate to Zulu" 
+                  : "Switch to English"}
             </Button>
           )}
         </div>
