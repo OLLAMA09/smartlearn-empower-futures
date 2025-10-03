@@ -66,17 +66,47 @@ export class QuizService {
       
       const generatedAt = new Date();
       
-      // Optimized quiz prompt for Netlify free plan 10-second limit
+      // Your detailed instructions for quiz generation
       const defaultQuizPrompt = `
-Create ${numQuestions} quiz questions from course "${courseData.title}".
+INSTRUCTIONS:
+1. Content Analysis: First, identify and extract key concepts from each content section and subtitle within the course material
+2. Section-Based Questions: Create ${numQuestions} multiple-choice questions, ensuring questions are distributed across different course sections and subtitles
+3. Question Attribution: Each question should:
+   - Reference the specific course section/subtitle it's testing
+   - Focus on important concepts from that particular section
+   - Test comprehension rather than memorization
+4. Answer Structure: Include 4 answer options for each question with only one correct answer
+5. Detailed Explanations: Provide comprehensive explanations that:
+   - Explain why the correct answer is right
+   - Reference the specific course section/subtitle where the concept was covered
+   - Briefly explain why incorrect options are wrong
 
+Question Format:
+\`\`\`
+Question X: [Question text]
+Section: [Course Section/Subtitle Name]
+
+A) [Option A]
+B) [Option B] 
+C) [Option C]
+D) [Option D]
+
+Correct Answer: [Letter]
+Explanation: [Detailed explanation referencing the course section and explaining the correct answer]
+\`\`\`
+
+Requirements:
+- Ensure questions cover different sections/subtitles proportionally
+- Vary question difficulty levels
+- Focus on practical application of concepts when possible
+- Include the course section reference for each question
+
+Course: "${courseData.title}"
 Content:
 ${contentForPrompt}
 
-Return JSON only:
-[{"id":1,"text":"Question text","section":"Section name","options":[{"id":1,"text":"Option A","isCorrect":false,"explanation":""},{"id":2,"text":"Option B","isCorrect":true,"explanation":"Correct because..."},{"id":3,"text":"Option C","isCorrect":false,"explanation":""},{"id":4,"text":"Option D","isCorrect":false,"explanation":""}]}]
-
-Requirements: Cover different sections, test understanding, one correct answer per question.`;
+Return as JSON array:
+[{"id":1,"text":"Question text","section":"Course Section/Subtitle Name","options":[{"id":1,"text":"Option A","isCorrect":false,"explanation":"Why this is wrong"},{"id":2,"text":"Option B","isCorrect":true,"explanation":"This is correct because [detailed explanation referencing the course section]"},{"id":3,"text":"Option C","isCorrect":false,"explanation":"Why this is wrong"},{"id":4,"text":"Option D","isCorrect":false,"explanation":"Why this is wrong"}]}]`;
 
       // Handle custom prompt with proper format conversion for free plan
       let finalPrompt: string;
@@ -101,7 +131,7 @@ Requirements: Cover different sections, test understanding, one correct answer p
         questionsJson = await this.generateQuizInChunks(sectionsWithSubtitles, courseData, numQuestions, temperature, customPrompt);
       } else {
         questionsJson = await openAIService.generateText([
-          { role: "system", content: "Return valid JSON arrays only. No extra text." },
+          { role: "system", content: "Expert quiz generator. Extract key concepts from course sections/subtitles. Create section-specific questions testing comprehension over memorization. Reference source sections in explanations. Return valid JSON only." },
           { role: "user", content: finalPrompt }
         ], temperature, true); // Force streaming for long content
       }
@@ -1012,7 +1042,7 @@ JSON only:
 
       try {
         const sectionResponse = await openAIService.generateText([
-          { role: "system", content: "Return only valid JSON. No other text." },
+          { role: "system", content: "Expert quiz generator. Extract key concepts from course sections/subtitles. Create section-specific questions testing comprehension over memorization. Reference source sections in explanations. Return valid JSON only." },
           { role: "user", content: sectionPrompt }
         ], temperature, true);
 

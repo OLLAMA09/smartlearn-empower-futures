@@ -4,10 +4,9 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Slider } from "@/components/ui/slider";
-import { Quiz, QuizQuestion, QuizSubmission, LecturerPromptConfig } from "@/types";
+import { Quiz, QuizQuestion, QuizSubmission } from "@/types";
 import { quizService } from "@/services/quizService";
-import { TranslationService } from '@/services/translationService';
-import { Loader2, Award, CheckCircle, X, Settings, Globe } from "lucide-react";
+import { Loader2, Award, CheckCircle, X, Settings } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/contexts/AuthContext";
 import { Separator } from "./ui/separator";
@@ -15,6 +14,7 @@ import { Progress } from "./ui/progress";
 import { Textarea } from "./ui/textarea";
 import { Switch } from "./ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
+import { PromptTemplateSelector } from "./PromptTemplateSelector";
 
 interface AIQuizGeneratorProps {
   courseId: string;
@@ -23,49 +23,7 @@ interface AIQuizGeneratorProps {
   isLecturer?: boolean; // Flag to identify if user is a lecturer
 }
 
-// Non-editable part of the prompt that ensures consistent JSON format
-const jsonFormatPrompt = `FORMAT YOUR RESPONSE AS JSON:
-[
-  {
-    "id": number,
-    "text": "question text",
-    "options": [
-      {
-        "id": number,
-        "text": "option text",
-        "isCorrect": boolean,
-        "explanation": "detailed explanation"
-      },
-      ...
-    ]
-  },
-  ...
-]`;
 
-// Default editable prompt content for lecturers
-const defaultEditablePrompt = `COURSE INFORMATION:
-- Title: {courseTitle}
-- Description: {courseDescription}
-
-COURSE CONTENT:
-{contentForPrompt}
-
-INSTRUCTIONS:
-1. Create {numQuestions} multiple-choice questions based on important concepts from the course content
-2. Each question should test the understanding of different key concepts
-3. Include 4 answer options for each question, with only one correct answer
-4. Provide a detailed explanation for why the correct answer is right
-`;
-
-// Complete prompt with both editable and non-editable parts
-const defaultCustomPrompt = `Generate a quiz for a course with the following details:
-
-${defaultEditablePrompt}
-
-${jsonFormatPrompt}
-
-Make sure to create varied questions covering different sections of the content. The correct answer should have a thorough explanation.
-`;
 
 const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = false }: AIQuizGeneratorProps) => {
   const { toast } = useToast();
@@ -90,15 +48,9 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
     previousHighScore?: number;
   } | null>(null);
   
-  // Lecturer prompt engineering options
-  const [promptConfig, setPromptConfig] = useState<LecturerPromptConfig>({
-    customPrompt: defaultCustomPrompt,
-    temperature: 0.7,
-    isEnabled: false
-  });
-  const [editablePrompt, setEditablePrompt] = useState<string>(defaultEditablePrompt);
+  // Template system
+  const [selectedCustomPrompt, setSelectedCustomPrompt] = useState<string>('');
   const [showPromptSettings, setShowPromptSettings] = useState(false);
-  // Translation functionality removed
   
   // Generate the AI quiz
   const generateQuiz = async () => {
@@ -122,21 +74,19 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
     
     setGenerating(true);
     try {
-      // Use lecturer's custom prompt if enabled
-      const customPrompt = promptConfig.isEnabled ? promptConfig.customPrompt : undefined;
-      const temperature = promptConfig.isEnabled ? promptConfig.temperature : 0.7;
+      // Use selected custom prompt template if available
+      const customPrompt = selectedCustomPrompt || undefined;
       
       // Log what we're using
-      if (promptConfig.isEnabled) {
-        console.log("Using lecturer custom prompt with temperature:", temperature);
+      if (selectedCustomPrompt) {
+        console.log("Using custom template prompt");
       }
       
       const result = await quizService.startQuiz(
         courseId, 
         currentUser.uid, 
         numQuestions,
-        customPrompt,
-        temperature
+        customPrompt
       );
 
       // Store the English version first
@@ -147,8 +97,8 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
       
       toast({
         title: "Quiz Generated",
-        description: promptConfig.isEnabled 
-          ? "Your AI quiz has been created using custom lecturer parameters."
+        description: selectedCustomPrompt 
+          ? "Your AI quiz has been created using your custom template."
           : "Your AI quiz has been created based on the course content.",
       });
       
@@ -250,95 +200,9 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
     setFeedback(null);
   };
 
-  // Update the full prompt when the editable part changes
-  const updateFullPrompt = (newEditablePrompt: string) => {
-    setEditablePrompt(newEditablePrompt);
-    const fullPrompt = `Generate a quiz for a course with the following details:
-
-${newEditablePrompt}
-
-${jsonFormatPrompt}
-
-Make sure to create varied questions covering different sections of the content. The correct answer should have a thorough explanation.`;
-    
-    setPromptConfig(prev => ({...prev, customPrompt: fullPrompt}));
-  };
-
-  // Initialize the editable part of the prompt when component mounts
-  useEffect(() => {
-    setEditablePrompt(defaultEditablePrompt);
-  }, []);
-
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [currentLanguage, setCurrentLanguage] = useState<'en'|'zu'>('en');
-  const [originalQuiz, setOriginalQuiz] = useState<Quiz | null>(null);
-  const translationService = new TranslationService();
-
-  const translateQuiz = async () => {
-    if (!quiz) return;
-    
-    setIsTranslating(true);
-    try {
-      // Store original English version if not stored yet
-      if (currentLanguage === 'en' && !originalQuiz) {
-        setOriginalQuiz(quiz);
-      }
-
-      if (currentLanguage === 'en') {
-        // Translate to Zulu
-        const translatedQuestions = await Promise.all(
-          quiz.questions.map(async (question) => {
-            const translatedQuestion = await translationService.translateText(question.question, 'zu');
-            const translatedOptions = await Promise.all(
-              question.options.map(async (option) => 
-                await translationService.translateText(option, 'zu')
-              )
-            );
-            const translatedExplanation = question.explanation 
-              ? await translationService.translateText(question.explanation, 'zu')
-              : undefined;
-            
-            return {
-              ...question,
-              question: translatedQuestion,
-              options: translatedOptions,
-              explanation: translatedExplanation
-            };
-          })
-        );
-
-        const translatedTitle = await translationService.translateText(quiz.title, 'zu');
-        setQuiz({
-          ...quiz,
-          title: translatedTitle,
-          questions: translatedQuestions
-        });
-        setCurrentLanguage('zu');
-        
-        toast({
-          title: "Quiz Translated",
-          description: "The quiz has been translated to Zulu"
-        });
-      } else if (originalQuiz) {
-        // Revert to English
-        setQuiz(originalQuiz);
-        setCurrentLanguage('en');
-        
-        toast({
-          title: "Quiz Language Changed",
-          description: "The quiz has been restored to English"
-        });
-      }
-    } catch (error) {
-      console.error('Translation error:', error);
-      toast({
-        title: "Translation Failed",
-        description: "Failed to change the quiz language. Please try again.",
-        variant: "destructive"
-      });
-    } finally {
-      setIsTranslating(false);
-    }
+  // Handle template selection
+  const handleTemplateSelect = (instructions: string) => {
+    setSelectedCustomPrompt(instructions);
   };
 
   const currentQuestion = quiz?.questions?.[currentQuestionIndex];
@@ -353,26 +217,7 @@ Make sure to create varied questions covering different sections of the content.
             <Award className="h-5 w-5 text-yellow-500" />
             {quiz ? quiz.title : `Content Quiz for ${courseTitle}`}
           </CardTitle>
-          {quiz && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={translateQuiz}
-              disabled={isTranslating}
-              className="flex items-center gap-2"
-            >
-              {isTranslating ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Globe className="h-4 w-4" />
-              )}
-              {isTranslating 
-                ? "Translating..." 
-                : currentLanguage === 'en' 
-                  ? "Translate to Zulu" 
-                  : "Switch to English"}
-            </Button>
-          )}
+
         </div>
         <CardDescription>
           {quiz 
@@ -399,172 +244,11 @@ Make sure to create varied questions covering different sections of the content.
               </div>
             </div>
             
-            {/* Lecturer-only prompt engineering options */}
-            {isLecturer && (
-              <Collapsible 
-                open={showPromptSettings} 
-                onOpenChange={setShowPromptSettings}
-                className="border rounded-md overflow-hidden bg-white shadow-sm"
-              >
-                <div className="flex items-center justify-between bg-gradient-to-r from-purple-50 to-blue-50 p-4 border-b">
-                  <div className="flex items-center gap-2">
-                    <Settings className="h-5 w-5 text-purple-600" />
-                    <h4 className="font-medium text-purple-900">Prompt Engineering Settings</h4>
-                  </div>
-                  <CollapsibleTrigger asChild>
-                    <Button variant="outline" size="sm" className="border-purple-200 hover:bg-purple-50">
-                      {showPromptSettings ? "Hide Settings" : "Configure Quiz"}
-                    </Button>
-                  </CollapsibleTrigger>
-                </div>
-                
-                <CollapsibleContent>
-                  <div className="p-5 space-y-6">
-                    {/* Enable/Disable Switch */}
-                    <div className="flex items-center justify-between bg-blue-50 p-4 rounded-lg">
-                      <div className="space-y-1">
-                        <Label htmlFor="enable-custom-prompt" className="text-blue-900 font-medium">
-                          Use Custom Quiz Settings
-                        </Label>
-                        <p className="text-sm text-blue-700">
-                          Enable to customize how quiz questions are generated
-                        </p>
-                      </div>
-                      <Switch 
-                        id="enable-custom-prompt"
-                        checked={promptConfig.isEnabled}
-                        onCheckedChange={(checked) => setPromptConfig(prev => ({...prev, isEnabled: checked}))}
-                        className="data-[state=checked]:bg-blue-600"
-                      />
-                    </div>
-                    
-                    {promptConfig.isEnabled && (
-                      <div className="space-y-6 border-t pt-5">
-                        {/* Temperature Setting */}
-                        <div className="space-y-4 bg-slate-50 p-4 rounded-lg">
-                          <div className="space-y-1.5">
-                            <div className="flex items-center justify-between">
-                              <Label htmlFor="temperature" className="text-lg font-medium">
-                                AI Creativity Level
-                              </Label>
-                              <span className="px-3 py-1 bg-white rounded-full text-sm font-bold border shadow-sm">
-                                {promptConfig.temperature?.toFixed(1) || "0.7"}
-                              </span>
-                            </div>
-                            <p className="text-sm text-slate-600">
-                              Adjust how creative or focused the quiz questions should be
-                            </p>
-                          </div>
-                          
-                          <div className="pt-2">
-                            <div className="flex justify-between mb-1 text-xs font-medium">
-                              <span className="text-blue-700">More Focused</span>
-                              <span className="text-purple-700">More Creative</span>
-                            </div>
-                            <Slider
-                              id="temperature"
-                              value={[promptConfig.temperature || 0.7]}
-                              min={0}
-                              max={1}
-                              step={0.1}
-                              onValueChange={(values) => setPromptConfig(prev => ({...prev, temperature: values[0]}))}
-                              className="flex-1"
-                            />
-                          </div>
-                          
-                          <div className="grid grid-cols-2 gap-3 mt-2 text-sm">
-                            <div className="bg-blue-50 p-3 rounded-md border border-blue-100">
-                              <h5 className="font-medium text-blue-800">Lower Values (0.1-0.3)</h5>
-                              <p className="text-blue-700 mt-1">Produces more consistent, predictable questions focusing on core concepts</p>
-                            </div>
-                            <div className="bg-purple-50 p-3 rounded-md border border-purple-100">
-                              <h5 className="font-medium text-purple-800">Higher Values (0.7-1.0)</h5>
-                              <p className="text-purple-700 mt-1">Creates more varied, creative questions exploring different angles</p>
-                            </div>
-                          </div>
-                        </div>
-                        
-                        {/* Only show Instructions field for editing */}
-                        <div className="space-y-6">
-                          <div>
-                            <Label htmlFor="custom-instructions" className="text-lg font-medium block mb-1">
-                              Quiz Instructions
-                            </Label>
-                            <p className="text-sm text-slate-600 mb-4">
-                              Only the instructions for question generation can be customized.<br />
-                              <span className="text-xs text-amber-700 font-semibold">Recommended: Keep instructions under 500 characters for best performance.</span>
-                            </p>
-                          </div>
-                          <div className="bg-white border rounded-lg shadow-sm overflow-hidden">
-                            <div className="bg-blue-50 p-4 border-b">
-                              <h5 className="font-medium text-blue-800">Instructions</h5>
-                              <p className="text-sm text-blue-600 mt-1">
-                                Edit the instructions below. Course information and content are auto-filled and hidden.
-                              </p>
-                            </div>
-                            <div className="p-5">
-                              <Textarea
-                                id="custom-instructions"
-                                value={
-                                  editablePrompt.split("INSTRUCTIONS:")[1] 
-                                    ? "INSTRUCTIONS:" + editablePrompt.split("INSTRUCTIONS:")[1] 
-                                    : ""
-                                }
-                                onChange={(e) => {
-                                  const newText = editablePrompt.split("INSTRUCTIONS:")[0] + e.target.value;
-                                  updateFullPrompt(newText);
-                                }}
-                                rows={6}
-                                className="font-mono text-sm"
-                              />
-                              <div className="flex justify-between items-center mt-2">
-                                <p className="text-xs text-slate-500">
-                                  This is the only editable section. Course details and content are locked.
-                                </p>
-                                <span className={`text-xs ${((editablePrompt.split("INSTRUCTIONS:")[1] || '').length > 500) ? 'text-red-600' : 'text-slate-400'}`}>
-                                  Characters: {(editablePrompt.split("INSTRUCTIONS:")[1] || '').length} / 500
-                                </span>
-                              </div>
-                            </div>
-                          </div>
-                          {/* JSON Format Section (Non-editable) */}
-                          <div className="border border-gray-300 rounded-lg overflow-hidden mt-6">
-                            <div className="bg-rose-50 border-b border-gray-300 p-3 flex items-center justify-between">
-                              <div>
-                                <h6 className="font-medium text-rose-900">Response Format (Non-editable)</h6>
-                                <p className="text-xs text-rose-700">
-                                  This section ensures consistent data format and cannot be modified
-                                </p>
-                              </div>
-                              <div className="bg-rose-100 text-rose-800 text-xs px-2 py-1 rounded-full border border-rose-200">
-                                Locked
-                              </div>
-                            </div>
-                            <div className="bg-gray-100 p-3 opacity-60">
-                              <pre className="text-xs whitespace-pre-wrap font-mono text-gray-700">{jsonFormatPrompt}</pre>
-                            </div>
-                          </div>
-                          {/* Reset Button */}
-                          <div className="flex justify-end mt-4">
-                            <Button 
-                              variant="outline" 
-                              size="sm"
-                              onClick={() => {
-                                setEditablePrompt(defaultEditablePrompt);
-                                updateFullPrompt(defaultEditablePrompt);
-                              }}
-                              className="text-blue-600 border-blue-300 hover:bg-blue-50"
-                            >
-                              Reset to Default Instructions
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-            )}
+            {/* Prompt Template Selector */}
+            <PromptTemplateSelector
+              onTemplateSelect={handleTemplateSelect}
+              className="border rounded-lg p-4 bg-gray-50"
+            />
             
             <Button 
               className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-medium py-6 text-lg shadow-md" 
