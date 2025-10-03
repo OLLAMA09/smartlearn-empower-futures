@@ -33,12 +33,13 @@ class OpenAIService {
   }
 
   /**
-   * Generate text using OpenAI
+   * Generate text using OpenAI with streaming support
    * @param messages Array of messages in the conversation
    * @param temperature Optional temperature parameter to control randomness (0.0-1.0)
+   * @param useStreaming Whether to use streaming (default: true for long content)
    * @returns Generated text response
    */
-  async generateText(messages: Message[], temperature: number = 0.7): Promise<string> {
+  async generateText(messages: Message[], temperature: number = 0.7, useStreaming?: boolean): Promise<string> {
     try {
       // Use mock response for testing if needed
       if (import.meta.env.VITE_USE_MOCK_RESPONSES === 'true') {
@@ -46,7 +47,13 @@ class OpenAIService {
         return this.getMockResponse(messages);
       }
 
-      // Call Netlify Function instead of OpenAI directly
+      // NETLIFY FREE PLAN: Always use streaming to avoid 10-second timeout
+      const totalContentLength = messages.reduce((sum, msg) => sum + msg.content.length, 0);
+      const shouldStream = true; // Always stream on free plan
+      
+      console.log(`� NETLIFY FREE PLAN: Forcing streaming mode for ${totalContentLength} characters (10s limit)`);
+
+      // Call Netlify Function with streaming support
       const response = await fetch('/.netlify/functions/openai-proxy', {
         method: 'POST',
         headers: {
@@ -55,11 +62,12 @@ class OpenAIService {
         body: JSON.stringify({
           model: this.model,
           messages,
-          max_tokens: 1500,
+          max_tokens: 1500, // Reduced for Netlify free plan 10s timeout
           temperature: temperature,
           top_p: 1,
           frequency_penalty: 0,
           presence_penalty: 0,
+          stream: true // Always stream on Netlify free plan
         }),
       });
 
@@ -74,16 +82,68 @@ class OpenAIService {
         console.error('OpenAI API Error:', data.error);
         throw new Error(data.error);
       }
+      
       const generatedText = data.choices[0].message.content;
-      console.log('✅ OpenAI (via Netlify Function) call successful');
+      console.log(`✅ OpenAI (via Netlify Function) call successful ${shouldStream ? 'with streaming' : ''}`);
       console.log(`📝 Generated ${generatedText.length} characters`);
       return generatedText;
     } catch (error: any) {
       console.error('❌ Error calling OpenAI via Netlify Function:', error);
-      // Fallback to mock response in case of API failure
+      
+      // Try the dedicated streaming endpoint as fallback
+      if (useStreaming !== false) {
+        console.log('🔄 Trying dedicated streaming endpoint as fallback...');
+        try {
+          return await this.generateTextWithStreaming(messages, temperature);
+        } catch (streamError) {
+          console.error('❌ Streaming fallback also failed:', streamError);
+        }
+      }
+      
+      // Final fallback to mock response
       console.warn('🔄 Using mock response due to API error');
       return this.getMockResponse(messages);
     }
+  }
+
+  /**
+   * Generate text using dedicated streaming endpoint
+   * @param messages Array of messages in the conversation
+   * @param temperature Temperature parameter
+   * @returns Generated text response
+   */
+  private async generateTextWithStreaming(messages: Message[], temperature: number = 0.7): Promise<string> {
+    console.log('🌊 Using dedicated streaming endpoint');
+    
+    const response = await fetch('/.netlify/functions/openai-stream', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: this.model,
+        messages,
+        max_tokens: 2000,
+        temperature: temperature,
+      }),
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => null);
+      console.error('OpenAI Streaming Proxy Error Details:', errorData);
+      throw new Error(`HTTP error! status: ${response.status}, details: ${JSON.stringify(errorData)}`);
+    }
+
+    const data = await response.json();
+    if (data.error) {
+      console.error('OpenAI Streaming API Error:', data.error);
+      throw new Error(data.error);
+    }
+    
+    const generatedText = data.choices[0].message.content;
+    console.log(`✅ OpenAI streaming call successful`);
+    console.log(`📝 Generated ${generatedText.length} characters via streaming`);
+    return generatedText;
   }
 
   /**

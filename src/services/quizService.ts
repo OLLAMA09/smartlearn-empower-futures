@@ -57,41 +57,23 @@ export class QuizService {
       
       const courseData = courseDoc.data() as Course;
       
-      // Extract text content from the course
-      const contentTexts = courseData.content
-        ?.map(item => ({
-          title: item.title,
-          content: item.content || ''
-        }))
-        .filter(item => item.content.length > 0) || [];
-      
-      // Format the course content for the AI prompt
-      const contentForPrompt = contentTexts
-        .map(item => `Section: ${item.title}\nContent: ${item.content}`)
-        .join('\n\n')
-        .substring(0, 4000); // Limit to 4000 chars to ensure it fits in the prompt
+      // Enhanced content analysis and formatting
+      const sectionsWithSubtitles = this.analyzeCourseContent(courseData);
+      const contentForPrompt = this.formatContentForPrompt(sectionsWithSubtitles);
       
       const generatedAt = new Date();
       
-      // Generate quiz questions using OpenAI directly from course content
+      // Optimized quiz prompt for Netlify free plan 10-second limit
       const defaultQuizPrompt = `
-I need you to create a quiz based on the following course content:
+Create ${numQuestions} quiz questions from course "${courseData.title}".
 
-Course Title: ${courseData.title}
-Course Description: ${courseData.description || ''}
-
-COURSE CONTENT:
+Content:
 ${contentForPrompt}
 
-Please generate ${numQuestions} multiple-choice questions that test understanding of key concepts from this course content.
+Return JSON only:
+[{"id":1,"text":"Question text","section":"Section name","options":[{"id":1,"text":"Option A","isCorrect":false,"explanation":""},{"id":2,"text":"Option B","isCorrect":true,"explanation":"Correct because..."},{"id":3,"text":"Option C","isCorrect":false,"explanation":""},{"id":4,"text":"Option D","isCorrect":false,"explanation":""}]}]
 
-Return your response as a JSON array of objects, each with:
-• id (number)
-• text (string) - the question text
-• options: array of 4 objects { id (number), text (string), isCorrect (boolean), explanation (string) }
-
-Make sure questions are varied and cover different sections of the content. The correct answer should be well-explained.
-`;
+Requirements: Cover different sections, test understanding, one correct answer per question.`;
 
       // Use custom prompt if provided, otherwise use default
       const finalPrompt = customPrompt 
@@ -101,10 +83,17 @@ Make sure questions are varied and cover different sections of the content. The 
                       .replace("{numQuestions}", numQuestions.toString())
         : defaultQuizPrompt;
 
-      const questionsJson = await openAIService.generateText([
-        { role: "system", content: "You are a quiz generator specializing in accountancy education." },
-        { role: "user", content: finalPrompt }
-      ], temperature);
+      // For Netlify free plan: Use chunked processing for large content
+      let questionsJson: string;
+      if (contentForPrompt.length > 2000) {
+        console.log('🚨 Large content detected - using chunked processing for free plan');
+        questionsJson = await this.generateQuizInChunks(sectionsWithSubtitles, courseData, numQuestions, temperature);
+      } else {
+        questionsJson = await openAIService.generateText([
+          { role: "system", content: "Return valid JSON arrays only. No extra text." },
+          { role: "user", content: finalPrompt }
+        ], temperature, true); // Force streaming for long content
+      }
       
       // 3) Parse and clean up the JSON response
       const questionsData = this.deserializeQuestions(questionsJson);
@@ -874,6 +863,153 @@ Make sure questions are varied and cover different sections of the content. The 
       console.error('Error getting user quiz history:', error);
       throw new Error('Failed to get user quiz history');
     }
+  }
+
+  /**
+   * Analyze course content to extract sections and subtitles
+   * @param courseData The course data
+   * @returns Analyzed content with sections and subtitles
+   */
+  private analyzeCourseContent(courseData: Course): Array<{
+    title: string;
+    content: string;
+    subtitles: string[];
+    keyWords: string[];
+  }> {
+    return courseData.content?.map(item => {
+      const content = item.content || '';
+      
+      // Extract subtitles from content (looking for headers like ##, ###, or bold text)
+      const subtitleMatches = content.match(/(?:^|\n)(?:#{2,3}\s+(.+)|(?:\*\*(.+?)\*\*)|(?:__(.+?)__))/gm) || [];
+      const subtitles = subtitleMatches
+        .map(match => match.replace(/^[\n#*_\s]+|[*_\s]+$/g, '').trim())
+        .filter(subtitle => subtitle.length > 0);
+
+      // Extract key words (words that appear frequently or are capitalized)
+      const keyWordMatches = content.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) || [];
+      const keyWords = [...new Set(keyWordMatches)].slice(0, 10); // Top 10 unique key terms
+
+      return {
+        title: item.title,
+        content: content,
+        subtitles: subtitles,
+        keyWords: keyWords
+      };
+    }).filter(item => item.content.length > 0) || [];
+  }
+
+  /**
+   * Format content for AI prompt with emphasis on sections and subtitles
+   * @param sectionsWithSubtitles Analyzed content sections
+   * @returns Formatted content string for the prompt
+   */
+  private formatContentForPrompt(sectionsWithSubtitles: Array<{
+    title: string;
+    content: string;
+    subtitles: string[];
+    keyWords: string[];
+  }>): string {
+    const maxTotalLength = 3000; // Reduced for Netlify free plan 10s limit
+    let formattedContent = '';
+    let currentLength = 0;
+
+    for (const section of sectionsWithSubtitles) {
+      const sectionHeader = `\n## SECTION: ${section.title}\n`;
+      const subtitlesInfo = section.subtitles.length > 0 
+        ? `**Key Subtitles:** ${section.subtitles.join(', ')}\n`
+        : '';
+      const keyWordsInfo = section.keyWords.length > 0 
+        ? `**Key Terms:** ${section.keyWords.join(', ')}\n`
+        : '';
+      
+      // Truncate content if necessary but prioritize beginning and subtitles
+      let sectionContent = section.content;
+      const maxSectionLength = Math.floor(maxTotalLength / sectionsWithSubtitles.length);
+      
+      if (sectionContent.length > maxSectionLength) {
+        const halfPoint = Math.floor(maxSectionLength / 2);
+        sectionContent = sectionContent.substring(0, halfPoint) + 
+                        "\n[... content continues ...]\n" + 
+                        sectionContent.substring(sectionContent.length - halfPoint);
+      }
+      
+      const fullSection = sectionHeader + subtitlesInfo + keyWordsInfo + 
+                         `**Content:**\n${sectionContent}\n`;
+      
+      if (currentLength + fullSection.length > maxTotalLength) {
+        break;
+      }
+      
+      formattedContent += fullSection;
+      currentLength += fullSection.length;
+    }
+
+    return formattedContent;
+  }
+
+  /**
+   * Generate quiz questions in chunks for Netlify free plan 10-second limit
+   * @param sectionsWithSubtitles Analyzed content sections
+   * @param courseData Course data
+   * @param numQuestions Total number of questions
+   * @param temperature Temperature setting
+   * @returns Combined questions JSON
+   */
+  private async generateQuizInChunks(
+    sectionsWithSubtitles: Array<{title: string; content: string; subtitles: string[]; keyWords: string[]}>,
+    courseData: Course,
+    numQuestions: number,
+    temperature: number
+  ): Promise<string> {
+    const questionsPerSection = Math.ceil(numQuestions / Math.min(sectionsWithSubtitles.length, 3)); // Max 3 sections for speed
+    const allQuestions: any[] = [];
+    const sectionsToProcess = sectionsWithSubtitles.slice(0, 3); // Limit to 3 sections for free plan
+
+    console.log(`🚀 Processing ${sectionsToProcess.length} sections with ${questionsPerSection} questions each`);
+
+    for (let i = 0; i < sectionsToProcess.length && allQuestions.length < numQuestions; i++) {
+      const section = sectionsToProcess[i];
+      const questionsNeeded = Math.min(questionsPerSection, numQuestions - allQuestions.length);
+      
+      if (questionsNeeded <= 0) break;
+
+      // Create a mini prompt for this section only
+      const sectionPrompt = `
+Create ${questionsNeeded} questions for "${section.title}" from course "${courseData.title}".
+
+Section: ${section.title}
+Key Terms: ${section.keyWords.slice(0, 5).join(', ')}
+Content: ${section.content.substring(0, 1000)}
+
+JSON only:
+[{"id":${allQuestions.length + 1},"text":"Question","section":"${section.title}","options":[{"id":1,"text":"A","isCorrect":false,"explanation":""},{"id":2,"text":"B","isCorrect":true,"explanation":"Correct..."},{"id":3,"text":"C","isCorrect":false,"explanation":""},{"id":4,"text":"D","isCorrect":false,"explanation":""}]}]`;
+
+      try {
+        const sectionResponse = await openAIService.generateText([
+          { role: "system", content: "Return only valid JSON. No other text." },
+          { role: "user", content: sectionPrompt }
+        ], temperature, true);
+
+        const sectionQuestions = this.deserializeQuestions(sectionResponse);
+        
+        // Update IDs to be sequential
+        sectionQuestions.forEach((q, index) => {
+          q.id = allQuestions.length + index + 1;
+        });
+        
+        allQuestions.push(...sectionQuestions.slice(0, questionsNeeded));
+        console.log(`✅ Generated ${sectionQuestions.length} questions from section: ${section.title}`);
+        
+      } catch (error) {
+        console.error(`❌ Error processing section ${section.title}:`, error);
+        // Continue with other sections
+      }
+    }
+
+    const finalQuestions = allQuestions.slice(0, numQuestions);
+    console.log(`🎯 Total questions generated: ${finalQuestions.length}/${numQuestions}`);
+    
+    return JSON.stringify(finalQuestions);
   }
 }
 

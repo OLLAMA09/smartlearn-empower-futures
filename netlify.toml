@@ -14,6 +14,7 @@
 [functions]
   node_bundler = "esbuild"
   external_node_modules = ["node-fetch"]
+  # Netlify free plan: 10 second max timeout
 
 [[redirects]]
   from = "/api/*"
@@ -28,12 +29,15 @@
 [build.environment]
   NODE_VERSION = "18"
 
+# Note: On free plan, all functions are limited to 10 seconds max
 [functions.openai-proxy]
   included_files = ["netlify/functions/**"]
   memory = 1024
-  timeout = 30
+
+[functions.openai-stream]
+  included_files = ["netlify/functions/**"]
+  memory = 1024
 
 [functions.azure-translate]
   included_files = ["netlify/functions/**"]
   memory = 256
-  timeout = 10
