@@ -8,6 +8,7 @@ import { db } from "@/lib/firebase";
 import { collection, getDocs } from "firebase/firestore";
 import { voiceRecognition } from "@/utils/voiceRecognition";
 import { toast } from "sonner";
+import { StandaloneQuestionnaireModal } from "./StandaloneQuestionnaireModal";
 
 interface HomepageProps {
   onGetStarted: () => void;
@@ -21,6 +22,7 @@ const Homepage = ({ onGetStarted }: HomepageProps) => {
   const [stats, setStats] = useState({ students: 0, courses: 0, rating: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showQuestionnaire, setShowQuestionnaire] = useState(false);
 
   const handleVoiceCommand = () => {
     if (!voiceRecognition.isSupported()) {
@@ -186,6 +188,15 @@ const Homepage = ({ onGetStarted }: HomepageProps) => {
                 </>
               )}
             </Button>
+
+            <Button
+              onClick={() => setShowQuestionnaire(true)}
+              variant="outline"
+              size="lg"
+              className="bg-transparent border-white text-white hover:bg-white hover:text-green-600 px-8 py-3 text-lg"
+            >
+              Share Feedback
+            </Button>
           </div>
 
           {voiceCommand && (
@@ -326,6 +337,12 @@ const Homepage = ({ onGetStarted }: HomepageProps) => {
           </Button>
         </div>
       </section>
+
+      {/* Feedback Questionnaire Modal */}
+      <StandaloneQuestionnaireModal 
+        isOpen={showQuestionnaire}
+        onClose={() => setShowQuestionnaire(false)}
+      />
     </div>
   );
 };

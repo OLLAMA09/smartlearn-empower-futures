@@ -7,11 +7,14 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
-import { Video, FileText, BookOpen, CheckCircle, Award, Loader2, Star } from "lucide-react";
+import { Video, FileText, BookOpen, CheckCircle, Award, Loader2, Star, MessageSquare, BarChart3 } from "lucide-react";
 import { StarRating } from "@/components/ui/star-rating";
 import { useAuth } from "@/contexts/AuthContext";
 import { enrollmentService } from "@/services/enrollmentService";
 import { toast } from "sonner";
+import { StandaloneQuestionnaireModal } from "./StandaloneQuestionnaireModal";
+import { QuestionnaireAnalytics } from "./QuestionnaireAnalytics";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import ReactMarkdown from "react-markdown";
 import removeMarkdown from "remove-markdown";
 import { collection, query, where, getDocs } from "firebase/firestore";
@@ -61,6 +64,7 @@ const CourseLibrary = ({ userRole, onCourseSelect, courses }: CourseLibraryProps
   const [enrolledCourseIds, setEnrolledCourseIds] = useState<string[]>([]);
   const [completedCourseIds, setCompletedCourseIds] = useState<string[]>([]);
   const [enrollingCourseId, setEnrollingCourseId] = useState<string | null>(null);
+  const [showAnalytics, setShowAnalytics] = useState(false);
   
   const filteredCourses = courses.filter(course => {
     const matchesSearch = course.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -230,8 +234,32 @@ const CourseLibrary = ({ userRole, onCourseSelect, courses }: CourseLibraryProps
     <div className="container mx-auto py-10">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="text-2xl font-bold">Course Library</h1>
-        <div className="text-sm text-gray-600">
-          Showing {preserveOrderedFilteredCourses.length} of {courses.length} courses
+        <div className="flex items-center gap-4">
+          {userRole === 'admin' || userRole === 'educator' ? (
+            <Button 
+              variant="outline" 
+              className="flex items-center gap-2"
+              onClick={() => setShowAnalytics(true)}
+            >
+              <BarChart3 className="h-4 w-4" />
+              View Analytics
+            </Button>
+          ) : (
+            <StandaloneQuestionnaireModal 
+              buttonText="Share Feedback"
+              buttonVariant="outline"
+              buttonSize="default"
+              trigger={
+                <Button variant="outline" className="flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4" />
+                  Share Feedback
+                </Button>
+              }
+            />
+          )}
+          <div className="text-sm text-gray-600">
+            Showing {preserveOrderedFilteredCourses.length} of {courses.length} courses
+          </div>
         </div>
       </div>
 
@@ -552,6 +580,27 @@ const CourseLibrary = ({ userRole, onCourseSelect, courses }: CourseLibraryProps
           </ScrollArea>
         </div>
       </div>
+
+      {/* Analytics Modal for Admins */}
+      <Dialog open={showAnalytics} onOpenChange={setShowAnalytics}>
+        <DialogContent className="max-w-6xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <BarChart3 className="w-5 h-5" />
+              Learning Experience Analytics
+            </DialogTitle>
+            <DialogDescription>
+              Comprehensive analysis of user feedback and questionnaire responses
+            </DialogDescription>
+          </DialogHeader>
+          <div className="mt-4">
+            <QuestionnaireAnalytics 
+              isAdmin={userRole === 'admin' || userRole === 'educator'}
+              courseId={undefined} // Shows all responses across courses for admins/educators
+            />
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
