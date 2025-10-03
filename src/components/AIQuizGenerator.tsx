@@ -15,6 +15,8 @@ import { Textarea } from "./ui/textarea";
 import { Switch } from "./ui/switch";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
 import { PromptTemplateSelector } from "./PromptTemplateSelector";
+import { PostQuizQuestionnaire } from "./PostQuizQuestionnaire";
+import { questionnaireService } from "@/services/questionnaireService";
 
 interface AIQuizGeneratorProps {
   courseId: string;
@@ -51,6 +53,10 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
   // Template system
   const [selectedCustomPrompt, setSelectedCustomPrompt] = useState<string>('');
   const [showPromptSettings, setShowPromptSettings] = useState(false);
+  
+  // Questionnaire system
+  const [showQuestionnaire, setShowQuestionnaire] = useState(false);
+  const [quizStartTime, setQuizStartTime] = useState<Date | null>(null);
   
   // Generate the AI quiz
   const generateQuiz = async () => {
@@ -94,6 +100,7 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
       setQuizResultId(result.quizResultId);
       setAnswers(new Array(result.quiz.questions.length).fill(-1));
       setCurrentQuestionIndex(0);
+      setQuizStartTime(new Date()); // Track when quiz started
       
       toast({
         title: "Quiz Generated",
@@ -167,8 +174,19 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
         console.log(`🎉 NEW HIGH SCORE! User ${currentUser.uid} achieved ${result.score}% (previous best: ${result.previousHighScore}%) in course ${courseId}`);
       }
       
-      // Notify parent component
-      onQuizComplete(result.score);
+      // Check if user should see questionnaire
+      const hasSubmittedBefore = await questionnaireService.hasUserSubmittedResponse(
+        currentUser.uid, 
+        quizResultId
+      );
+      
+      if (!hasSubmittedBefore) {
+        // Show questionnaire for first-time quiz completion
+        setShowQuestionnaire(true);
+      } else {
+        // Notify parent component immediately if questionnaire already completed
+        onQuizComplete(result.score);
+      }
       
       toast({
         title: result.isNewHighScore ? "🎉 New High Score!" : "Quiz Submitted",
@@ -198,6 +216,22 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
     setQuizCompleted(false);
     setScore(0);
     setFeedback(null);
+    setShowQuestionnaire(false);
+    setQuizStartTime(null);
+  };
+
+  // Handle questionnaire completion
+  const handleQuestionnaireComplete = () => {
+    setShowQuestionnaire(false);
+    // Notify parent component after questionnaire is completed
+    onQuizComplete(score);
+  };
+
+  // Handle questionnaire skip
+  const handleQuestionnaireSkip = () => {
+    setShowQuestionnaire(false);
+    // Notify parent component if questionnaire is skipped
+    onQuizComplete(score);
   };
 
   // Handle template selection
@@ -210,6 +244,7 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
   const allQuestionsAnswered = quiz?.questions && answers.every(a => a >= 0);
   
   return (
+    <>
     <Card className="max-w-4xl mx-auto">
       <CardHeader className="space-y-2">
         <div className="flex justify-between items-start gap-4">
@@ -467,6 +502,22 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
         )}
       </CardContent>
     </Card>
+
+    {/* Post-Quiz Questionnaire */}
+    {showQuestionnaire && quizResultId && quizStartTime && currentUser && (
+      <PostQuizQuestionnaire
+        userId={currentUser.uid}
+        courseId={courseId}
+        courseTitle={courseTitle}
+        quizResultId={quizResultId}
+        quizScore={score}
+        timeSpentOnQuiz={Math.round((new Date().getTime() - quizStartTime.getTime()) / 1000)}
+        questionsAnswered={quiz?.questions.length || 0}
+        onComplete={handleQuestionnaireComplete}
+        onSkip={handleQuestionnaireSkip}
+      />
+    )}
+  </>
   );
 };
 
