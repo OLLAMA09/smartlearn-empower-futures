@@ -43,9 +43,12 @@ export class QuizService {
     generatedAt: Date
   }> {
     try {
-      console.log(`Starting AI quiz for course ${courseId} with ${numQuestions} questions`);
-      console.log(`Using temperature: ${temperature}`);
-      if (customPrompt) console.log(`Using custom prompt engineering`);
+      // Development logging only
+      if (import.meta.env.MODE === 'development') {
+        console.log(`Starting AI quiz for course ${courseId} with ${numQuestions} questions`);
+        console.log(`Using temperature: ${temperature}`);
+        if (customPrompt) console.log(`Using custom prompt engineering`);
+      }
       
       // Get the course content
       const courseRef = doc(db, this.coursesCollection, courseId);
@@ -75,19 +78,27 @@ Return JSON only:
 
 Requirements: Cover different sections, test understanding, one correct answer per question.`;
 
-      // Use custom prompt if provided, otherwise use default
-      const finalPrompt = customPrompt 
-        ? customPrompt.replace("{contentForPrompt}", contentForPrompt)
-                      .replace("{courseTitle}", courseData.title)
-                      .replace("{courseDescription}", courseData.description || '')
-                      .replace("{numQuestions}", numQuestions.toString())
-        : defaultQuizPrompt;
+      // Handle custom prompt with proper format conversion for free plan
+      let finalPrompt: string;
+      if (customPrompt) {
+        // Convert your custom prompt format to work with free plan JSON optimization
+        finalPrompt = this.convertCustomPromptForFreePlan(
+          customPrompt, 
+          contentForPrompt, 
+          courseData, 
+          numQuestions
+        );
+      } else {
+        finalPrompt = defaultQuizPrompt;
+      }
 
       // For Netlify free plan: Use chunked processing for large content
       let questionsJson: string;
       if (contentForPrompt.length > 2000) {
-        console.log('🚨 Large content detected - using chunked processing for free plan');
-        questionsJson = await this.generateQuizInChunks(sectionsWithSubtitles, courseData, numQuestions, temperature);
+        if (import.meta.env.MODE === 'development') {
+          console.log('🚨 Large content detected - using chunked processing for free plan');
+        }
+        questionsJson = await this.generateQuizInChunks(sectionsWithSubtitles, courseData, numQuestions, temperature, customPrompt);
       } else {
         questionsJson = await openAIService.generateText([
           { role: "system", content: "Return valid JSON arrays only. No extra text." },
@@ -95,8 +106,8 @@ Requirements: Cover different sections, test understanding, one correct answer p
         ], temperature, true); // Force streaming for long content
       }
       
-      // 3) Parse and clean up the JSON response
-      const questionsData = this.deserializeQuestions(questionsJson);
+      // 3) Parse and clean up the response (supports both JSON and text formats)
+      const questionsData = this.parseQuestionsFlexible(questionsJson);
       
       // 4) Create a new quiz object
       const quiz: Quiz = {
@@ -953,13 +964,15 @@ Requirements: Cover different sections, test understanding, one correct answer p
    * @param courseData Course data
    * @param numQuestions Total number of questions
    * @param temperature Temperature setting
+   * @param customPrompt Optional custom prompt to apply
    * @returns Combined questions JSON
    */
   private async generateQuizInChunks(
     sectionsWithSubtitles: Array<{title: string; content: string; subtitles: string[]; keyWords: string[]}>,
     courseData: Course,
     numQuestions: number,
-    temperature: number
+    temperature: number,
+    customPrompt?: string
   ): Promise<string> {
     const questionsPerSection = Math.ceil(numQuestions / Math.min(sectionsWithSubtitles.length, 3)); // Max 3 sections for speed
     const allQuestions: any[] = [];
@@ -973,8 +986,20 @@ Requirements: Cover different sections, test understanding, one correct answer p
       
       if (questionsNeeded <= 0) break;
 
-      // Create a mini prompt for this section only
-      const sectionPrompt = `
+      // Create a mini prompt for this section (use custom prompt if provided)
+      let sectionPrompt: string;
+      if (customPrompt) {
+        // Apply custom prompt requirements to this section
+        const sectionContent = `## SECTION: ${section.title}\n**Key Terms:** ${section.keyWords.slice(0, 5).join(', ')}\n**Content:**\n${section.content.substring(0, 1000)}`;
+        sectionPrompt = this.convertCustomPromptForFreePlan(
+          customPrompt.replace('{numQuestions}', questionsNeeded.toString()),
+          sectionContent,
+          courseData,
+          questionsNeeded
+        );
+      } else {
+        // Use default optimized prompt
+        sectionPrompt = `
 Create ${questionsNeeded} questions for "${section.title}" from course "${courseData.title}".
 
 Section: ${section.title}
@@ -983,6 +1008,7 @@ Content: ${section.content.substring(0, 1000)}
 
 JSON only:
 [{"id":${allQuestions.length + 1},"text":"Question","section":"${section.title}","options":[{"id":1,"text":"A","isCorrect":false,"explanation":""},{"id":2,"text":"B","isCorrect":true,"explanation":"Correct..."},{"id":3,"text":"C","isCorrect":false,"explanation":""},{"id":4,"text":"D","isCorrect":false,"explanation":""}]}]`;
+      }
 
       try {
         const sectionResponse = await openAIService.generateText([
@@ -990,7 +1016,7 @@ JSON only:
           { role: "user", content: sectionPrompt }
         ], temperature, true);
 
-        const sectionQuestions = this.deserializeQuestions(sectionResponse);
+        const sectionQuestions = this.parseQuestionsFlexible(sectionResponse);
         
         // Update IDs to be sequential
         sectionQuestions.forEach((q, index) => {
@@ -1010,6 +1036,136 @@ JSON only:
     console.log(`🎯 Total questions generated: ${finalQuestions.length}/${numQuestions}`);
     
     return JSON.stringify(finalQuestions);
+  }
+
+  /**
+   * Convert custom prompt format to work with Netlify free plan JSON optimization
+   * @param customPrompt The original custom prompt
+   * @param contentForPrompt Formatted course content
+   * @param courseData Course data
+   * @param numQuestions Number of questions
+   * @returns Optimized prompt for free plan
+   */
+  private convertCustomPromptForFreePlan(
+    customPrompt: string,
+    contentForPrompt: string,
+    courseData: Course,
+    numQuestions: number
+  ): string {
+    // Replace placeholders in custom prompt
+    let processedPrompt = customPrompt
+      .replace(/\{contentForPrompt\}/g, contentForPrompt)
+      .replace(/\{courseTitle\}/g, courseData.title)
+      .replace(/\{courseDescription\}/g, courseData.description || '')
+      .replace(/\{numQuestions\}/g, numQuestions.toString());
+
+    // Convert to JSON-optimized format for free plan while preserving custom requirements
+    const optimizedPrompt = `
+Based on your detailed requirements, create ${numQuestions} questions from course "${courseData.title}".
+
+${processedPrompt}
+
+**CRITICAL for Netlify Free Plan**: Return ONLY a JSON array, no other text:
+
+[
+  {
+    "id": 1,
+    "text": "Question text referencing specific section",
+    "section": "Course Section/Subtitle Name",
+    "options": [
+      {"id": 1, "text": "Option A", "isCorrect": false, "explanation": "Why this is wrong"},
+      {"id": 2, "text": "Option B", "isCorrect": true, "explanation": "Detailed explanation referencing the course section and why this is correct"},
+      {"id": 3, "text": "Option C", "isCorrect": false, "explanation": "Why this is wrong"},
+      {"id": 4, "text": "Option D", "isCorrect": false, "explanation": "Why this is wrong"}
+    ]
+  }
+]
+
+Follow your format requirements but return as JSON only. Include section references and detailed explanations as specified.`;
+
+    return optimizedPrompt;
+  }
+
+  /**
+   * Parse questions from either JSON or text format (for backward compatibility)
+   * @param response The AI response
+   * @returns Parsed questions array
+   */
+  private parseQuestionsFlexible(response: string): any[] {
+    try {
+      // First try JSON parsing
+      return this.deserializeQuestions(response);
+    } catch (error) {
+      console.log('JSON parsing failed, attempting text format parsing...');
+      return this.parseTextFormatQuestions(response);
+    }
+  }
+
+  /**
+   * Parse questions from text format (your custom format)
+   * @param response The AI response in text format
+   * @returns Parsed questions array
+   */
+  private parseTextFormatQuestions(response: string): any[] {
+    const questions: any[] = [];
+    const questionBlocks = response.split(/Question \d+:/i).slice(1);
+
+    questionBlocks.forEach((block, index) => {
+      try {
+        const lines = block.trim().split('\n').map(line => line.trim()).filter(line => line);
+        
+        // Extract question text (first line)
+        const questionText = lines[0]?.replace(/^\d+[.:]?\s*/, '').trim();
+        if (!questionText) return;
+
+        // Extract section
+        const sectionLine = lines.find(line => line.startsWith('Section:'));
+        const section = sectionLine?.replace('Section:', '').trim() || 'General';
+
+        // Extract options
+        const options: any[] = [];
+        const optionLines = lines.filter(line => /^[A-D]\)/.test(line));
+        
+        optionLines.forEach((optionLine, optionIndex) => {
+          const optionText = optionLine.replace(/^[A-D]\)\s*/, '').trim();
+          options.push({
+            id: optionIndex + 1,
+            text: optionText,
+            isCorrect: false,
+            explanation: ""
+          });
+        });
+
+        // Extract correct answer
+        const correctAnswerLine = lines.find(line => line.startsWith('Correct Answer:'));
+        const correctLetter = correctAnswerLine?.replace('Correct Answer:', '').trim().toUpperCase();
+        const correctIndex = correctLetter ? correctLetter.charCodeAt(0) - 65 : 0;
+        
+        if (options[correctIndex]) {
+          options[correctIndex].isCorrect = true;
+        }
+
+        // Extract explanation
+        const explanationLine = lines.find(line => line.startsWith('Explanation:'));
+        const explanation = explanationLine?.replace('Explanation:', '').trim() || '';
+        
+        if (options[correctIndex]) {
+          options[correctIndex].explanation = explanation;
+        }
+
+        questions.push({
+          id: index + 1,
+          text: questionText,
+          section: section,
+          options: options
+        });
+
+      } catch (error) {
+        console.error(`Error parsing question block ${index + 1}:`, error);
+      }
+    });
+
+    return questions;
   }
 }
 

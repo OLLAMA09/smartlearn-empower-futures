@@ -1,7 +1,10 @@
 import fetch from 'node-fetch';
 
 export const handler = async function(event) {
-  console.log('OpenAI Proxy function invoked');
+  // Minimal logging for production
+  if (process.env.NODE_ENV === 'development') {
+    console.log('OpenAI Proxy function invoked');
+  }
   
   // CORS headers for all responses
   const corsHeaders = {

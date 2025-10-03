@@ -15,9 +15,11 @@ class OpenAIService {
   constructor() {
     this.model = import.meta.env.VITE_OPENAI_MODEL || 'gpt-4o-mini';
     this.translationService = new TranslationService();
-    // Debug log to verify configuration
-    console.log('OpenAI configuration:');
-    console.log('MODEL:', this.model);
+    // Debug log to verify configuration (development only)
+    if (import.meta.env.MODE === 'development') {
+      console.log('OpenAI configuration:');
+      console.log('MODEL:', this.model);
+    }
     // Validate configuration
     this.validateConfiguration();
   }
@@ -28,8 +30,10 @@ class OpenAIService {
   private validateConfiguration(): void {
     // No API key validation needed in frontend
     this.isConfigured = true;
-    console.log('✅ OpenAI configuration validated (frontend, using Netlify Function)');
-    console.log(`🚀 Using model: ${this.model}`);
+    if (import.meta.env.MODE === 'development') {
+      console.log('✅ OpenAI configuration validated (frontend, using Netlify Function)');
+      console.log(`🚀 Using model: ${this.model}`);
+    }
   }
 
   /**
@@ -41,15 +45,19 @@ class OpenAIService {
    */
   async generateText(messages: Message[], temperature: number = 0.7, useStreaming?: boolean): Promise<string> {
     try {
-      // Use mock response for testing if needed
-      if (import.meta.env.VITE_USE_MOCK_RESPONSES === 'true') {
-        console.warn('🔄 Using mock response for development (forced).');
+      // Production mode - no mock responses unless explicitly needed in development
+      if (import.meta.env.MODE === 'development' && import.meta.env.VITE_USE_MOCK_RESPONSES === 'true') {
+        console.warn('🔄 Using mock response for development only.');
         return this.getMockResponse(messages);
       }
 
       // NETLIFY FREE PLAN: Always use streaming to avoid 10-second timeout
       const totalContentLength = messages.reduce((sum, msg) => sum + msg.content.length, 0);
       const shouldStream = true; // Always stream on free plan
+      
+      if (import.meta.env.MODE === 'development') {
+        console.log(`🚨 NETLIFY FREE PLAN: Forcing streaming mode for ${totalContentLength} characters (10s limit)`);
+      }
       
       console.log(`� NETLIFY FREE PLAN: Forcing streaming mode for ${totalContentLength} characters (10s limit)`);
 
@@ -84,25 +92,35 @@ class OpenAIService {
       }
       
       const generatedText = data.choices[0].message.content;
-      console.log(`✅ OpenAI (via Netlify Function) call successful ${shouldStream ? 'with streaming' : ''}`);
-      console.log(`📝 Generated ${generatedText.length} characters`);
+      if (import.meta.env.MODE === 'development') {
+        console.log(`✅ OpenAI call successful ${shouldStream ? 'with streaming' : ''}`);
+        console.log(`📝 Generated ${generatedText.length} characters`);
+      }
       return generatedText;
     } catch (error: any) {
-      console.error('❌ Error calling OpenAI via Netlify Function:', error);
+      if (import.meta.env.MODE === 'development') {
+        console.error('❌ Error calling OpenAI via Netlify Function:', error);
+      }
       
       // Try the dedicated streaming endpoint as fallback
       if (useStreaming !== false) {
-        console.log('🔄 Trying dedicated streaming endpoint as fallback...');
         try {
           return await this.generateTextWithStreaming(messages, temperature);
         } catch (streamError) {
-          console.error('❌ Streaming fallback also failed:', streamError);
+          // Silent fail in production, log in development
+          if (import.meta.env.MODE === 'development') {
+            console.error('❌ Streaming fallback also failed:', streamError);
+          }
         }
       }
       
-      // Final fallback to mock response
-      console.warn('🔄 Using mock response due to API error');
-      return this.getMockResponse(messages);
+      // Final fallback - in production, throw error instead of mock
+      if (import.meta.env.MODE === 'production') {
+        throw new Error('OpenAI service unavailable. Please try again later.');
+      } else {
+        console.warn('🔄 Using mock response due to API error (dev only)');
+        return this.getMockResponse(messages);
+      }
     }
   }
 
@@ -113,7 +131,9 @@ class OpenAIService {
    * @returns Generated text response
    */
   private async generateTextWithStreaming(messages: Message[], temperature: number = 0.7): Promise<string> {
-    console.log('🌊 Using dedicated streaming endpoint');
+    if (import.meta.env.MODE === 'development') {
+      console.log('🌊 Using dedicated streaming endpoint');
+    }
     
     const response = await fetch('/.netlify/functions/openai-stream', {
       method: 'POST',
@@ -141,8 +161,10 @@ class OpenAIService {
     }
     
     const generatedText = data.choices[0].message.content;
-    console.log(`✅ OpenAI streaming call successful`);
-    console.log(`📝 Generated ${generatedText.length} characters via streaming`);
+    if (import.meta.env.MODE === 'development') {
+      console.log(`✅ OpenAI streaming call successful`);
+      console.log(`📝 Generated ${generatedText.length} characters via streaming`);
+    }
     return generatedText;
   }
 

@@ -5,10 +5,12 @@ interface ImportMetaEnv {
   readonly VITE_AZURE_OPENAI_ENDPOINT: string;
   readonly VITE_AZURE_OPENAI_DEPLOYMENT_NAME: string;
   readonly VITE_AZURE_OPENAI_API_VERSION: string;
+  readonly VITE_OPENAI_MODEL?: string;
+  readonly VITE_USE_MOCK_RESPONSES?: string;
   readonly DEV: boolean;
   readonly MODE: string;
   readonly PROD: boolean;
-  // Add other environment variables as needed
+  // Firebase environment variables
   readonly VITE_FIREBASE_API_KEY: string;
   readonly VITE_FIREBASE_AUTH_DOMAIN: string;
   readonly VITE_FIREBASE_PROJECT_ID: string;
