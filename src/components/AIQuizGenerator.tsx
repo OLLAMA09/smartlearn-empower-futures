@@ -17,6 +17,8 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collap
 import { PromptTemplateSelector } from "./PromptTemplateSelector";
 import { PostQuizQuestionnaire } from "./PostQuizQuestionnaire";
 import { questionnaireService } from "@/services/questionnaireService";
+import { translationService } from "@/services/translationService";
+import { Languages } from "lucide-react";
 
 interface AIQuizGeneratorProps {
   courseId: string;
@@ -58,6 +60,77 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
   const [showQuestionnaire, setShowQuestionnaire] = useState(false);
   const [quizStartTime, setQuizStartTime] = useState<Date | null>(null);
   
+  // Translation system
+  const [enableTranslation, setEnableTranslation] = useState(false);
+  const [targetLanguage, setTargetLanguage] = useState('zu'); // Default to Zulu
+  const [translatedQuiz, setTranslatedQuiz] = useState<Quiz | null>(null);
+  const [isTranslating, setIsTranslating] = useState(false);
+  
+  // Translate quiz to target language
+  const translateQuiz = async (originalQuiz: Quiz) => {
+    if (!enableTranslation) return;
+    
+    setIsTranslating(true);
+    
+    try {
+      console.log(`🌍 Translating quiz to ${targetLanguage}...`);
+      
+      // Translate quiz title
+      const translatedTitle = await translationService.translateText(originalQuiz.title, targetLanguage);
+      
+      // Translate each question
+      const translatedQuestions = await Promise.all(
+        originalQuiz.questions.map(async (question) => {
+          // Translate question text
+          const translatedQuestionText = await translationService.translateText(question.question, targetLanguage);
+          
+          // Translate all options (options are strings in the type)
+          const translatedOptions = await Promise.all(
+            question.options.map(async (option) => 
+              await translationService.translateText(option, targetLanguage)
+            )
+          );
+          
+          // Translate explanation if it exists
+          const translatedExplanation = question.explanation 
+            ? await translationService.translateText(question.explanation, targetLanguage)
+            : question.explanation;
+          
+          return {
+            ...question,
+            question: translatedQuestionText,
+            options: translatedOptions,
+            explanation: translatedExplanation
+          };
+        })
+      );
+      
+      const translatedQuizData: Quiz = {
+        ...originalQuiz,
+        title: translatedTitle,
+        questions: translatedQuestions
+      };
+      
+      setTranslatedQuiz(translatedQuizData);
+      
+      toast({
+        title: "Translation Complete",
+        description: `Quiz has been translated to ${targetLanguage === 'zu' ? 'Zulu (isiZulu)' : targetLanguage}.`,
+      });
+      
+      console.log('✅ Quiz translation completed successfully');
+    } catch (error) {
+      console.error('❌ Translation failed:', error);
+      toast({
+        title: "Translation Failed",
+        description: "Unable to translate quiz. Showing original English version.",
+        variant: "destructive"
+      });
+    } finally {
+      setIsTranslating(false);
+    }
+  };
+
   // Generate the AI quiz
   const generateQuiz = async () => {
     if (!courseId) {
@@ -92,10 +165,12 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
         courseId, 
         currentUser.uid, 
         numQuestions,
-        customPrompt
+        customPrompt,
+        0.7, // temperature
+        enableTranslation ? targetLanguage : undefined
       );
 
-      // Store the English version first
+      // Store the quiz (already translated if requested)
       setQuiz(result.quiz);
       setQuizResultId(result.quizResultId);
       setAnswers(new Array(result.quiz.questions.length).fill(-1));
@@ -103,13 +178,13 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
       setQuizStartTime(new Date()); // Track when quiz started
       
       toast({
-        title: "Quiz Generated",
-        description: selectedCustomPrompt 
-          ? "Your AI quiz has been created using your custom template."
-          : "Your AI quiz has been created based on the course content.",
+        title: enableTranslation ? "Quiz Generated & Translated" : "Quiz Generated",
+        description: enableTranslation 
+          ? `Your AI quiz has been created and translated to Zulu (isiZulu).`
+          : selectedCustomPrompt 
+            ? "Your AI quiz has been created using your custom template."
+            : "Your AI quiz has been created based on the course content.",
       });
-      
-      // Translation functionality removed
     } catch (error) {
       console.error("Error generating AI quiz:", error);
       toast({
@@ -251,6 +326,12 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
           <CardTitle className="flex items-center gap-2">
             <Award className="h-5 w-5 text-yellow-500" />
             {quiz ? quiz.title : `Content Quiz for ${courseTitle}`}
+            {enableTranslation && quiz && (
+              <div className="flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-1 rounded-md text-xs font-medium">
+                <Languages className="h-3 w-3" />
+                Zulu
+              </div>
+            )}
           </CardTitle>
 
         </div>
@@ -285,11 +366,38 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
               className="border rounded-lg p-4 bg-gray-50"
             />
             
+            {/* Translation Settings */}
+            <div className="border rounded-lg p-4 bg-blue-50 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center space-x-2">
+                  <Languages className="h-4 w-4 text-blue-600" />
+                  <Label htmlFor="enable-translation" className="text-sm font-medium text-blue-800">
+                    Enable Zulu Translation
+                  </Label>
+                </div>
+                <Switch 
+                  id="enable-translation"
+                  checked={enableTranslation} 
+                  onCheckedChange={setEnableTranslation}
+                />
+              </div>
+              {enableTranslation && (
+                <div className="text-sm text-blue-700 bg-blue-100 p-3 rounded-lg">
+                  <div className="flex items-center gap-2 mb-1">
+                    <Languages className="h-3 w-3" />
+                    <span className="font-medium">Translation Enabled</span>
+                  </div>
+                  <p>Quiz questions and options will be translated to Zulu (isiZulu) after generation using Azure Translator.</p>
+                </div>
+              )}
+            </div>
+            
             <Button 
               className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700 text-white font-medium py-6 text-lg shadow-md" 
               onClick={generateQuiz}
+              disabled={generating || isTranslating}
             >
-              Generate Content Quiz
+              {generating ? "Generating Quiz..." : isTranslating ? "Translating..." : "Generate Content Quiz"}
             </Button>
           </div>
         )}

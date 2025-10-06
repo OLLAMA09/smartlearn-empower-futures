@@ -36,7 +36,8 @@ export class QuizService {
     userId: string, 
     numQuestions: number = 5,
     customPrompt?: string,
-    temperature: number = 0.7
+    temperature: number = 0.7,
+    translateTo?: string
   ): Promise<{
     quiz: Quiz,
     quizResultId: string,
@@ -128,12 +129,12 @@ Return as JSON array:
         if (import.meta.env.MODE === 'development') {
           console.log('🚨 Large content detected - using chunked processing for free plan');
         }
-        questionsJson = await this.generateQuizInChunks(sectionsWithSubtitles, courseData, numQuestions, temperature, customPrompt);
+        questionsJson = await this.generateQuizInChunks(sectionsWithSubtitles, courseData, numQuestions, temperature, customPrompt, translateTo);
       } else {
         questionsJson = await openAIService.generateText([
           { role: "system", content: "Expert quiz generator. Extract key concepts from course sections/subtitles. Create section-specific questions testing comprehension over memorization. Reference source sections in explanations. Return valid JSON only." },
           { role: "user", content: finalPrompt }
-        ], temperature, true); // Force streaming for long content
+        ], temperature, true, translateTo); // Force streaming for long content with optional translation
       }
       
       // 3) Parse and clean up the response (supports both JSON and text formats)
@@ -1002,7 +1003,8 @@ Return as JSON array:
     courseData: Course,
     numQuestions: number,
     temperature: number,
-    customPrompt?: string
+    customPrompt?: string,
+    translateTo?: string
   ): Promise<string> {
     const questionsPerSection = Math.ceil(numQuestions / Math.min(sectionsWithSubtitles.length, 3)); // Max 3 sections for speed
     const allQuestions: any[] = [];
@@ -1044,7 +1046,7 @@ JSON only:
         const sectionResponse = await openAIService.generateText([
           { role: "system", content: "Expert quiz generator. Extract key concepts from course sections/subtitles. Create section-specific questions testing comprehension over memorization. Reference source sections in explanations. Return valid JSON only." },
           { role: "user", content: sectionPrompt }
-        ], temperature, true);
+        ], temperature, true, translateTo);
 
         const sectionQuestions = this.parseQuestionsFlexible(sectionResponse);
         

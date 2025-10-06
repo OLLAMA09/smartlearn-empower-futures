@@ -41,9 +41,10 @@ class OpenAIService {
    * @param messages Array of messages in the conversation
    * @param temperature Optional temperature parameter to control randomness (0.0-1.0)
    * @param useStreaming Whether to use streaming (default: true for long content)
-   * @returns Generated text response
+   * @param translateTo Optional language code to translate the response to (e.g., 'zu' for Zulu)
+   * @returns Generated text response (translated if requested)
    */
-  async generateText(messages: Message[], temperature: number = 0.7, useStreaming?: boolean): Promise<string> {
+  async generateText(messages: Message[], temperature: number = 0.7, useStreaming?: boolean, translateTo?: string): Promise<string> {
     try {
       // Production mode - no mock responses unless explicitly needed in development
       if (import.meta.env.MODE === 'development' && import.meta.env.VITE_USE_MOCK_RESPONSES === 'true') {
@@ -96,6 +97,20 @@ class OpenAIService {
         console.log(`✅ OpenAI call successful ${shouldStream ? 'with streaming' : ''}`);
         console.log(`📝 Generated ${generatedText.length} characters`);
       }
+      
+      // Translate if requested
+      if (translateTo) {
+        console.log(`🌍 Translating response to ${translateTo}`);
+        try {
+          const translatedText = await this.translationService.translateText(generatedText, translateTo);
+          console.log(`✅ Translation successful (${generatedText.length} → ${translatedText.length} chars)`);
+          return translatedText;
+        } catch (translationError) {
+          console.warn('⚠️ Translation failed, returning original text:', translationError);
+          return generatedText;
+        }
+      }
+      
       return generatedText;
     } catch (error: any) {
       if (import.meta.env.MODE === 'development') {
@@ -105,7 +120,7 @@ class OpenAIService {
       // Try the dedicated streaming endpoint as fallback
       if (useStreaming !== false) {
         try {
-          return await this.generateTextWithStreaming(messages, temperature);
+          return await this.generateTextWithStreaming(messages, temperature, translateTo);
         } catch (streamError) {
           // Silent fail in production, log in development
           if (import.meta.env.MODE === 'development') {
@@ -128,9 +143,10 @@ class OpenAIService {
    * Generate text using dedicated streaming endpoint
    * @param messages Array of messages in the conversation
    * @param temperature Temperature parameter
+   * @param translateTo Optional language code to translate the response to
    * @returns Generated text response
    */
-  private async generateTextWithStreaming(messages: Message[], temperature: number = 0.7): Promise<string> {
+  private async generateTextWithStreaming(messages: Message[], temperature: number = 0.7, translateTo?: string): Promise<string> {
     if (import.meta.env.MODE === 'development') {
       console.log('🌊 Using dedicated streaming endpoint');
     }
@@ -165,6 +181,20 @@ class OpenAIService {
       console.log(`✅ OpenAI streaming call successful`);
       console.log(`📝 Generated ${generatedText.length} characters via streaming`);
     }
+    
+    // Translate if requested
+    if (translateTo) {
+      console.log(`🌍 Translating streamed response to ${translateTo}`);
+      try {
+        const translatedText = await this.translationService.translateText(generatedText, translateTo);
+        console.log(`✅ Streaming translation successful (${generatedText.length} → ${translatedText.length} chars)`);
+        return translatedText;
+      } catch (translationError) {
+        console.warn('⚠️ Streaming translation failed, returning original text:', translationError);
+        return generatedText;
+      }
+    }
+    
     return generatedText;
   }
 
