@@ -1,7 +1,7 @@
 import { db } from '@/lib/firebase';
 import { 
   collection, doc, getDoc, setDoc, addDoc, updateDoc, deleteDoc, 
-  getDocs, query, where, orderBy, serverTimestamp, Timestamp 
+  getDocs, query, where, serverTimestamp, Timestamp 
 } from 'firebase/firestore';
 import { CustomPromptTemplate, SavedPromptTemplate } from '@/types/promptTemplates';
 import { v4 as uuidv4 } from 'uuid';
@@ -107,8 +107,7 @@ Requirements:
     try {
       const q = query(
         collection(db, this.userTemplatesCollection),
-        where('createdBy', '==', userId),
-        orderBy('updatedAt', 'desc')
+        where('createdBy', '==', userId)
       );
       
       const snapshot = await getDocs(q);
@@ -126,6 +125,9 @@ Requirements:
           isDefault: data.isDefault || false
         });
       });
+
+      // Sort by updatedAt in descending order on the client side
+      templates.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
       return templates;
     } catch (error) {

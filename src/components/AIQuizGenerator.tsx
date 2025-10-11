@@ -131,6 +131,17 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
     }
   };
 
+  // Effect to translate quiz when translation toggle changes
+  useEffect(() => {
+    if (enableTranslation && quiz && !isTranslating) {
+      // Always re-translate when toggle is enabled, even if we have a previous translation
+      translateQuiz(quiz);
+    } else if (!enableTranslation) {
+      // Clear translation when toggle is disabled
+      setTranslatedQuiz(null);
+    }
+  }, [enableTranslation, quiz]);
+
   // Generate the AI quiz
   const generateQuiz = async () => {
     if (!courseId) {
@@ -166,24 +177,25 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
         currentUser.uid, 
         numQuestions,
         customPrompt,
-        0.7, // temperature
-        enableTranslation ? targetLanguage : undefined
+        0.7 // temperature
+        // Always generate in English first, then translate client-side if needed
       );
 
-      // Store the quiz (already translated if requested)
+      // Store the quiz
       setQuiz(result.quiz);
       setQuizResultId(result.quizResultId);
       setAnswers(new Array(result.quiz.questions.length).fill(-1));
       setCurrentQuestionIndex(0);
       setQuizStartTime(new Date()); // Track when quiz started
       
+      // Clear any existing translation since we have a new quiz
+      setTranslatedQuiz(null);
+      
       toast({
-        title: enableTranslation ? "Quiz Generated & Translated" : "Quiz Generated",
-        description: enableTranslation 
-          ? `Your AI quiz has been created and translated to Zulu (isiZulu).`
-          : selectedCustomPrompt 
-            ? "Your AI quiz has been created using your custom template."
-            : "Your AI quiz has been created based on the course content.",
+        title: "Quiz Generated",
+        description: selectedCustomPrompt 
+          ? "Your AI quiz has been created using your custom template."
+          : "Your AI quiz has been created based on the course content.",
       });
     } catch (error) {
       console.error("Error generating AI quiz:", error);
@@ -314,9 +326,11 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
     setSelectedCustomPrompt(instructions);
   };
 
-  const currentQuestion = quiz?.questions?.[currentQuestionIndex];
+  // Use translated quiz if translation is enabled and available, otherwise use original quiz
+  const displayQuiz = enableTranslation && translatedQuiz ? translatedQuiz : quiz;
+  const currentQuestion = displayQuiz?.questions?.[currentQuestionIndex];
   const isAnswered = answers[currentQuestionIndex] !== undefined && answers[currentQuestionIndex] >= 0;
-  const allQuestionsAnswered = quiz?.questions && answers.every(a => a >= 0);
+  const allQuestionsAnswered = displayQuiz?.questions && answers.every(a => a >= 0);
   
   return (
     <>
@@ -325,8 +339,8 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
         <div className="flex justify-between items-start gap-4">
           <CardTitle className="flex items-center gap-2">
             <Award className="h-5 w-5 text-yellow-500" />
-            {quiz ? quiz.title : `Content Quiz for ${courseTitle}`}
-            {enableTranslation && quiz && (
+            {displayQuiz ? displayQuiz.title : `Content Quiz for ${courseTitle}`}
+            {enableTranslation && displayQuiz && (
               <div className="flex items-center gap-1 bg-blue-100 text-blue-800 px-2 py-1 rounded-md text-xs font-medium">
                 <Languages className="h-3 w-3" />
                 Zulu
@@ -336,7 +350,7 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
 
         </div>
         <CardDescription>
-          {quiz 
+          {displayQuiz 
             ? "Answer all questions to test your understanding of the course material" 
             : "Generate a quiz based on what you've learned in this course"}
         </CardDescription>
@@ -413,19 +427,19 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
           </div>
         )}
         
-        {quiz && !quizCompleted && (
+        {displayQuiz && !quizCompleted && (
           <div className="space-y-6">
             {/* Progress indicator */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <span className="text-sm font-medium text-gray-500">
-                  Question {currentQuestionIndex + 1} of {quiz.questions.length}
+                  Question {currentQuestionIndex + 1} of {displayQuiz.questions.length}
                 </span>
                 <span className="text-sm font-medium">
-                  {Math.round(((answers.filter(a => a >= 0).length) / quiz.questions.length) * 100)}% answered
+                  {Math.round(((answers.filter(a => a >= 0).length) / displayQuiz.questions.length) * 100)}% answered
                 </span>
               </div>
-              <Progress value={(answers.filter(a => a >= 0).length / quiz.questions.length) * 100} />
+              <Progress value={(answers.filter(a => a >= 0).length / displayQuiz.questions.length) * 100} />
             </div>
             
             {/* Course Content Quiz Introduction */}
