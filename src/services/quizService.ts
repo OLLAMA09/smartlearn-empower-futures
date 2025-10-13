@@ -65,22 +65,46 @@ export class QuizService {
       const sectionsWithSubtitles = this.analyzeCourseContent(courseData);
       const contentForPrompt = this.formatContentForPrompt(sectionsWithSubtitles);
       
+      // Validate that we have sufficient content
+      if (!contentForPrompt || contentForPrompt.trim().length < 100) {
+        throw new Error(`Insufficient course content for quiz generation. Course "${courseData.title}" needs more detailed content sections to create meaningful questions.`);
+      }
+      
+      // Development logging to verify content is being used
+      if (import.meta.env.MODE === 'development') {
+        console.log(`📚 Course Data Retrieved:`, {
+          title: courseData.title,
+          contentSections: courseData.content?.length || 0,
+          totalContentLength: courseData.content?.reduce((total, item) => total + (item.content?.length || 0), 0) || 0
+        });
+        console.log(`📋 Analyzed Content Sections:`, sectionsWithSubtitles.length);
+        console.log(`📝 Content for Prompt Length:`, contentForPrompt.length);
+        console.log(`📄 Content Preview:`, contentForPrompt.substring(0, 300) + "...");
+        console.log(`✅ Content validation passed - sufficient content available for quiz generation`);
+      }
+      
       const generatedAt = new Date();
       
       // Your detailed instructions for quiz generation
       const defaultQuizPrompt = `
+CRITICAL: You MUST use the actual course content provided below, NOT just the course title. Generate questions based on the specific concepts, details, and information contained within the course content sections.
+
 INSTRUCTIONS:
-1. Content Analysis: First, identify and extract key concepts from each content section and subtitle within the course material
-2. Section-Based Questions: Create ${numQuestions} multiple-choice questions, ensuring questions are distributed across different course sections and subtitles
-3. Question Attribution: Each question should:
-   - Reference the specific course section/subtitle it's testing
-   - Focus on important concepts from that particular section
-   - Test comprehension rather than memorization
+1. Content Analysis: Thoroughly analyze the provided course content sections below. Extract key concepts, facts, procedures, and important details from the ACTUAL CONTENT TEXT.
+2. Section-Based Questions: Create ${numQuestions} multiple-choice questions based ONLY on information found in the course content sections provided below.
+3. Question Attribution: Each question MUST:
+   - Be answerable using information from the provided course content
+   - Reference specific details, concepts, or procedures mentioned in the content
+   - Focus on important concepts from the actual course material (not general knowledge)
+   - Test comprehension of the specific content provided
 4. Answer Structure: Include 4 answer options for each question with only one correct answer
 5. Detailed Explanations: Provide comprehensive explanations that:
-   - Explain why the correct answer is right
-   - Reference the specific course section/subtitle where the concept was covered
+   - Quote or reference specific parts of the course content
+   - Explain why the correct answer is right based on the provided material
+   - Reference the specific course section/subtitle where the information was found
    - Briefly explain why incorrect options are wrong
+
+IMPORTANT: If the course content is insufficient or empty, return an error message instead of generating generic questions.
 
 Question Format:
 \`\`\`
@@ -103,8 +127,12 @@ Requirements:
 - Include the course section reference for each question
 
 Course: "${courseData.title}"
-Content:
+Course Description: "${courseData.description}"
+
+COURSE CONTENT SECTIONS (Base all questions on this specific content):
 ${contentForPrompt}
+
+REMINDER: Generate questions based ONLY on the content above, not general knowledge about the course title.
 
 Return as JSON array:
 [{"id":1,"text":"Question text","section":"Course Section/Subtitle Name","options":[{"id":1,"text":"Option A","isCorrect":false,"explanation":"Why this is wrong"},{"id":2,"text":"Option B","isCorrect":true,"explanation":"This is correct because [detailed explanation referencing the course section]"},{"id":3,"text":"Option C","isCorrect":false,"explanation":"Why this is wrong"},{"id":4,"text":"Option D","isCorrect":false,"explanation":"Why this is wrong"}]}]`;
@@ -132,13 +160,25 @@ Return as JSON array:
         questionsJson = await this.generateQuizInChunks(sectionsWithSubtitles, courseData, numQuestions, temperature, customPrompt, translateTo);
       } else {
         questionsJson = await openAIService.generateText([
-          { role: "system", content: "Expert quiz generator. Extract key concepts from course sections/subtitles. Create section-specific questions testing comprehension over memorization. Reference source sections in explanations. Return valid JSON only." },
+          { 
+            role: "system", 
+            content: "You are an expert quiz generator. CRITICAL: You must use ONLY the actual course content provided in the user message, not general knowledge or assumptions. Base all questions on specific information, concepts, and details found in the provided course material. Extract key concepts from the course sections and create questions that test comprehension of the specific content provided. Reference source sections in explanations. Return valid JSON only." 
+          },
           { role: "user", content: finalPrompt }
         ], temperature, true, translateTo); // Force streaming for long content with optional translation
       }
       
       // 3) Parse and clean up the response (supports both JSON and text formats)
       const questionsData = this.parseQuestionsFlexible(questionsJson);
+      
+      // Quality check: Ensure questions are based on content, not just title
+      if (import.meta.env.MODE === 'development') {
+        console.log(`🔍 Quality Check: Generated ${questionsData.length} questions`);
+        questionsData.forEach((q, index) => {
+          console.log(`Q${index + 1}: ${q.text.substring(0, 80)}...`);
+          if (q.section) console.log(`   Section: ${q.section}`);
+        });
+      }
       
       // 4) Create a new quiz object
       const quiz: Quiz = {
@@ -918,8 +958,18 @@ Return as JSON array:
     subtitles: string[];
     keyWords: string[];
   }> {
-    return courseData.content?.map(item => {
+    if (!courseData.content || courseData.content.length === 0) {
+      console.warn(`⚠️ No content sections found in course: ${courseData.title}`);
+      return [];
+    }
+
+    const analyzedSections = courseData.content.map(item => {
       const content = item.content || '';
+      
+      if (!content || content.trim().length === 0) {
+        console.warn(`⚠️ Empty content in section: ${item.title}`);
+        return null;
+      }
       
       // Extract subtitles from content (looking for headers like ##, ###, or bold text)
       const subtitleMatches = content.match(/(?:^|\n)(?:#{2,3}\s+(.+)|(?:\*\*(.+?)\*\*)|(?:__(.+?)__))/gm) || [];
@@ -931,13 +981,24 @@ Return as JSON array:
       const keyWordMatches = content.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) || [];
       const keyWords = [...new Set(keyWordMatches)].slice(0, 10); // Top 10 unique key terms
 
+      if (import.meta.env.MODE === 'development') {
+        console.log(`📖 Section "${item.title}": ${content.length} chars, ${subtitles.length} subtitles, ${keyWords.length} key terms`);
+      }
+
       return {
         title: item.title,
         content: content,
         subtitles: subtitles,
         keyWords: keyWords
       };
-    }).filter(item => item.content.length > 0) || [];
+    }).filter(item => item !== null && item.content.length > 0);
+
+    return analyzedSections as Array<{
+      title: string;
+      content: string;
+      subtitles: string[];
+      keyWords: string[];
+    }>;
   }
 
   /**
@@ -1044,7 +1105,10 @@ JSON only:
 
       try {
         const sectionResponse = await openAIService.generateText([
-          { role: "system", content: "Expert quiz generator. Extract key concepts from course sections/subtitles. Create section-specific questions testing comprehension over memorization. Reference source sections in explanations. Return valid JSON only." },
+          { 
+            role: "system", 
+            content: "You are an expert quiz generator. CRITICAL: Base all questions ONLY on the specific course section content provided. Do not use general knowledge. Extract key concepts from the provided section and create questions that test comprehension of the specific content. Reference source sections in explanations. Return valid JSON only." 
+          },
           { role: "user", content: sectionPrompt }
         ], temperature, true, translateTo);
 
