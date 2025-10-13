@@ -62,8 +62,19 @@ Requirements:
     isDefault?: boolean;
   }): Promise<string> {
     try {
+      // Check if template with same name already exists
+      const existingTemplates = await this.getUserTemplates(userId);
+      const duplicateName = existingTemplates.find(t => t.name.toLowerCase() === template.name.toLowerCase());
+      
+      if (duplicateName) {
+        console.warn(`⚠️ Template with name "${template.name}" already exists`);
+        throw new Error(`A template with the name "${template.name}" already exists. Please choose a different name.`);
+      }
+
       const templateId = uuidv4();
       const now = new Date();
+      
+      console.log(`💾 Creating new template "${template.name}" with ID: ${templateId}`);
       
       const templateData: CustomPromptTemplate = {
         id: templateId,
@@ -90,7 +101,7 @@ Requirements:
         await this.setUserDefaultTemplate(userId, templateId);
       }
 
-      console.log(`Template "${template.name}" saved successfully`);
+      console.log(`✅ Template "${template.name}" saved successfully with ID: ${templateId}`);
       return templateId;
     } catch (error) {
       console.error('Error saving template:', error);
@@ -129,6 +140,7 @@ Requirements:
       // Sort by updatedAt in descending order on the client side
       templates.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
 
+      console.log(`📋 Loaded ${templates.length} templates for user ${userId}:`, templates.map(t => t.name));
       return templates;
     } catch (error) {
       console.error('Error getting user templates:', error);

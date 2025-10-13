@@ -169,7 +169,10 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
       
       // Log what we're using
       if (selectedCustomPrompt) {
-        console.log("Using custom template prompt");
+        console.log("🚀 Using custom template prompt for quiz generation");
+        console.log("📝 Template preview:", selectedCustomPrompt.substring(0, 100) + "...");
+      } else {
+        console.log("🔧 Using default prompt template");
       }
       
       const result = await quizService.startQuiz(
@@ -323,6 +326,7 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
 
   // Handle template selection
   const handleTemplateSelect = (instructions: string) => {
+    console.log('🎯 Template selected for quiz generation');
     setSelectedCustomPrompt(instructions);
   };
 
@@ -380,6 +384,13 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
               className="border rounded-lg p-4 bg-gray-50"
             />
             
+            {/* Custom Template Indicator */}
+            {selectedCustomPrompt && (
+              <div className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg p-2">
+                ✅ Custom template active - Quiz will be generated using your selected prompt template
+              </div>
+            )}
+            
             {/* Translation Settings */}
             <div className="border rounded-lg p-4 bg-blue-50 space-y-3">
               <div className="flex items-center justify-between">
@@ -413,6 +424,14 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
             >
               {generating ? "Generating Quiz..." : isTranslating ? "Translating..." : "Generate Content Quiz"}
             </Button>
+            
+            {/* Development Debug Info */}
+            {import.meta.env.MODE === 'development' && selectedCustomPrompt && (
+              <div className="text-xs text-gray-600 bg-gray-50 border rounded p-2 font-mono">
+                <div className="font-semibold mb-1">Debug: Template Preview</div>
+                <div className="truncate">{selectedCustomPrompt.substring(0, 120)}...</div>
+              </div>
+            )}
           </div>
         )}
         

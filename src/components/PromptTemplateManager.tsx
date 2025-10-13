@@ -42,6 +42,7 @@ export const PromptTemplateManager: React.FC<PromptTemplateManagerProps> = ({
   const [userTemplates, setUserTemplates] = useState<SavedPromptTemplate[]>([]);
   const [popularTemplates, setPopularTemplates] = useState<SavedPromptTemplate[]>([]);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [selectedTab, setSelectedTab] = useState<'my-templates' | 'popular'>('my-templates');
   
   // Template editor state
@@ -66,22 +67,76 @@ export const PromptTemplateManager: React.FC<PromptTemplateManagerProps> = ({
     
     try {
       setLoading(true);
+      console.log('🔄 Loading templates for user:', currentUser.uid);
+      
       const [userTmpl, popularTmpl] = await Promise.all([
         promptTemplateService.getUserTemplates(currentUser.uid),
         promptTemplateService.getPopularTemplates()
       ]);
       
+      console.log('✅ User templates loaded:', userTmpl.length);
+      console.log('✅ Popular templates loaded:', popularTmpl.length);
+      
       setUserTemplates(userTmpl);
       setPopularTemplates(popularTmpl);
     } catch (error) {
-      console.error('Error loading templates:', error);
+      console.error('❌ Error loading templates:', error);
       toast({
         title: "Error",
-        description: "Failed to load templates",
+        description: "Failed to load templates. Try creating a template first.",
         variant: "destructive"
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const createSampleTemplate = async () => {
+    if (!currentUser || saving) return;
+    
+    // Check if a sample template already exists
+    const existingSample = userTemplates.find(t => t.name === "Basic Quiz Template");
+    if (existingSample) {
+      toast({
+        title: "Sample Already Exists",
+        description: "A Basic Quiz Template already exists in your templates."
+      });
+      return;
+    }
+    
+    const sampleTemplate = {
+      name: "Basic Quiz Template",
+      description: "A simple template for generating basic multiple-choice quizzes",
+      instructions: `Create {numQuestions} multiple-choice questions based on the course content.
+
+Each question should:
+- Focus on key concepts from the material
+- Have 4 answer options with only one correct answer
+- Include a brief explanation for the correct answer
+- Be appropriate for the course level
+
+Format each question clearly with numbered options (A, B, C, D).`,
+      tags: ['basic', 'multiple-choice'],
+      isDefault: false
+    };
+
+    try {
+      setSaving(true);
+      await promptTemplateService.saveTemplate(currentUser.uid, sampleTemplate);
+      toast({
+        title: "Sample Template Created",
+        description: "A sample template has been created for you to edit."
+      });
+      loadTemplates();
+    } catch (error) {
+      console.error('❌ Error creating sample template:', error);
+      toast({
+        title: "Error",
+        description: "Failed to create sample template",
+        variant: "destructive"
+      });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -130,17 +185,23 @@ export const PromptTemplateManager: React.FC<PromptTemplateManagerProps> = ({
       return;
     }
 
+    if (saving) return; // Prevent duplicate saves
+
     try {
+      setSaving(true);
+      let savedTemplateId: string;
+      
       if (editingTemplate) {
         // Update existing template
         await promptTemplateService.updateTemplate(currentUser.uid, editingTemplate.id, editorForm);
+        savedTemplateId = editingTemplate.id;
         toast({
           title: "Success",
           description: "Template updated successfully"
         });
       } else {
         // Create new template
-        await promptTemplateService.saveTemplate(currentUser.uid, editorForm);
+        savedTemplateId = await promptTemplateService.saveTemplate(currentUser.uid, editorForm);
         toast({
           title: "Success",
           description: "Template saved successfully"
@@ -148,7 +209,21 @@ export const PromptTemplateManager: React.FC<PromptTemplateManagerProps> = ({
       }
       
       closeEditor();
-      loadTemplates();
+      await loadTemplates();
+      
+      // Auto-select the saved/updated template by refetching it
+      if (onSelectTemplate) {
+        try {
+          const updatedTemplates = await promptTemplateService.getUserTemplates(currentUser.uid);
+          const savedTemplate = updatedTemplates.find(t => t.id === savedTemplateId);
+          if (savedTemplate) {
+            console.log(`🎯 Auto-selecting saved template: ${savedTemplate.name}`);
+            onSelectTemplate(savedTemplate);
+          }
+        } catch (error) {
+          console.error('Error auto-selecting template:', error);
+        }
+      }
     } catch (error) {
       console.error('Error saving template:', error);
       toast({
@@ -156,6 +231,8 @@ export const PromptTemplateManager: React.FC<PromptTemplateManagerProps> = ({
         description: "Failed to save template",
         variant: "destructive"
       });
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -332,13 +409,23 @@ export const PromptTemplateManager: React.FC<PromptTemplateManagerProps> = ({
           <p className="text-gray-600">Manage and customize your quiz generation prompts</p>
         </div>
         
-        <Dialog open={isEditorOpen} onOpenChange={setIsEditorOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={() => openEditor()}>
-              <Plus className="w-4 h-4 mr-2" />
-              New Template
-            </Button>
-          </DialogTrigger>
+        <div className="flex gap-2">
+          <Button 
+            onClick={loadTemplates}
+            variant="outline"
+            disabled={loading}
+          >
+            <Clock className="w-4 h-4 mr-2" />
+            {loading ? 'Loading...' : 'Refresh'}
+          </Button>
+          
+          <Dialog open={isEditorOpen} onOpenChange={setIsEditorOpen}>
+            <DialogTrigger asChild>
+              <Button onClick={() => openEditor()}>
+                <Plus className="w-4 h-4 mr-2" />
+                New Template
+              </Button>
+            </DialogTrigger>
           
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
@@ -403,14 +490,15 @@ export const PromptTemplateManager: React.FC<PromptTemplateManagerProps> = ({
                   <X className="w-4 h-4 mr-2" />
                   Cancel
                 </Button>
-                <Button onClick={saveTemplate}>
+                <Button onClick={saveTemplate} disabled={saving}>
                   <Save className="w-4 h-4 mr-2" />
-                  {editingTemplate ? 'Update' : 'Save'} Template
+                  {saving ? 'Saving...' : editingTemplate ? 'Update Template' : 'Save Template'}
                 </Button>
               </div>
             </div>
           </DialogContent>
-        </Dialog>
+          </Dialog>
+        </div>
       </div>
 
       <Tabs value={selectedTab} onValueChange={(value) => setSelectedTab(value as any)}>
@@ -432,7 +520,17 @@ export const PromptTemplateManager: React.FC<PromptTemplateManagerProps> = ({
             <div className="text-center py-8 text-gray-500">
               <FileText className="w-12 h-12 mx-auto mb-4 opacity-50" />
               <p>No templates yet</p>
-              <p className="text-sm">Create your first custom prompt template</p>
+              <p className="text-sm mb-4">Create your first custom prompt template</p>
+              <div className="space-y-2">
+                <Button onClick={() => openEditor()} variant="outline" size="sm">
+                  <Plus className="w-4 h-4 mr-2" />
+                  Create New Template
+                </Button>
+                <Button onClick={createSampleTemplate} variant="ghost" size="sm" disabled={saving}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  {saving ? 'Creating...' : 'Create Sample Template'}
+                </Button>
+              </div>
             </div>
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">

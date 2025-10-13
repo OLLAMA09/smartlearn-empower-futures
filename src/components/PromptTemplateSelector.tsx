@@ -115,6 +115,7 @@ export const PromptTemplateSelector: React.FC<PromptTemplateSelectorProps> = ({
   };
 
   const handleTemplateFromManager = (template: SavedPromptTemplate) => {
+    console.log(`📝 Template selected from manager: ${template.name}`);
     setSelectedTemplate(template);
     onTemplateSelect(template.instructions);
     setIsManagerOpen(false);
@@ -134,7 +135,13 @@ export const PromptTemplateSelector: React.FC<PromptTemplateSelectorProps> = ({
         </div>
         
         {currentUser && (
-          <Dialog open={isManagerOpen} onOpenChange={setIsManagerOpen}>
+          <Dialog open={isManagerOpen} onOpenChange={(open) => {
+            setIsManagerOpen(open);
+            // Reload templates when manager closes to ensure we have the latest templates
+            if (!open && currentUser) {
+              loadTemplates();
+            }
+          }}>
             <DialogTrigger asChild>
               <Button variant="outline" size="sm">
                 <Settings className="w-4 h-4 mr-2" />
