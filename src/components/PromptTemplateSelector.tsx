@@ -20,11 +20,13 @@ import { PromptTemplateManager } from './PromptTemplateManager';
 interface PromptTemplateSelectorProps {
   onTemplateSelect: (instructions: string) => void;
   className?: string;
+  courseId?: string; // For course-specific templates
 }
 
 export const PromptTemplateSelector: React.FC<PromptTemplateSelectorProps> = ({
   onTemplateSelect,
-  className = ""
+  className = "",
+  courseId
 }) => {
   const { currentUser } = useAuth();
   const [templates, setTemplates] = useState<SavedPromptTemplate[]>([]);
@@ -33,34 +35,62 @@ export const PromptTemplateSelector: React.FC<PromptTemplateSelectorProps> = ({
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (currentUser) {
-      loadTemplates();
-    } else {
-      // Load default template for non-authenticated users
-      const defaultTemplate: SavedPromptTemplate = {
-        id: 'default',
-        name: 'Default Template',
-        description: 'Standard quiz generation prompt',
-        instructions: promptTemplateService.getDefaultTemplate(),
-        createdAt: new Date(),
-        updatedAt: new Date(),
-        isDefault: true
-      };
-      setTemplates([defaultTemplate]);
-      setSelectedTemplate(defaultTemplate);
-      onTemplateSelect(defaultTemplate.instructions);
-    }
-  }, [currentUser]);
+    loadTemplates();
+  }, [currentUser, courseId]);
 
   const loadTemplates = async () => {
-    if (!currentUser) return;
-    
     try {
       setLoading(true);
-      const userTemplates = await promptTemplateService.getUserTemplates(currentUser.uid);
+      let templates: SavedPromptTemplate[] = [];
       
-      // If user has no templates, create a default one
-      if (userTemplates.length === 0) {
+      // Load course-specific templates if courseId is provided
+      if (courseId) {
+        console.log('🎯 Loading course-specific templates for courseId:', courseId);
+        templates = await promptTemplateService.getCourseTemplates(courseId);
+        
+        // Try to get the active template for this course
+        const activeTemplate = await promptTemplateService.getActiveCourseTemplate(courseId);
+        if (activeTemplate) {
+          setSelectedTemplate(activeTemplate);
+          onTemplateSelect(activeTemplate.instructions);
+          console.log('✅ Using active course template:', activeTemplate.name);
+        } else {
+          // Use the first template or default
+          const templateToUse = templates[0];
+          setSelectedTemplate(templateToUse);
+          onTemplateSelect(templateToUse.instructions);
+          console.log('📝 Using first available course template:', templateToUse.name);
+        }
+      } 
+      // Load user's personal templates if no courseId (fallback to old behavior)
+      else if (currentUser) {
+        console.log('👤 Loading personal user templates');
+        templates = await promptTemplateService.getUserTemplates(currentUser.uid);
+        
+        // If user has no templates, create a default one
+        if (templates.length === 0) {
+          const defaultTemplate: SavedPromptTemplate = {
+            id: 'default',
+            name: 'Default Template',
+            description: 'Standard quiz generation prompt',
+            instructions: promptTemplateService.getDefaultTemplate(),
+            createdAt: new Date(),
+            updatedAt: new Date(),
+            isDefault: true
+          };
+          templates = [defaultTemplate];
+          setSelectedTemplate(defaultTemplate);
+          onTemplateSelect(defaultTemplate.instructions);
+        } else {
+          // Find default template or use first one
+          const defaultTemplate = templates.find(t => t.isDefault) || templates[0];
+          setSelectedTemplate(defaultTemplate);
+          onTemplateSelect(defaultTemplate.instructions);
+        }
+      }
+      // No user and no courseId - use system default
+      else {
+        console.log('🔧 Using system default template');
         const defaultTemplate: SavedPromptTemplate = {
           id: 'default',
           name: 'Default Template',
@@ -70,17 +100,12 @@ export const PromptTemplateSelector: React.FC<PromptTemplateSelectorProps> = ({
           updatedAt: new Date(),
           isDefault: true
         };
-        setTemplates([defaultTemplate]);
-        setSelectedTemplate(defaultTemplate);
-        onTemplateSelect(defaultTemplate.instructions);
-      } else {
-        setTemplates(userTemplates);
-        
-        // Find default template or use first one
-        const defaultTemplate = userTemplates.find(t => t.isDefault) || userTemplates[0];
+        templates = [defaultTemplate];
         setSelectedTemplate(defaultTemplate);
         onTemplateSelect(defaultTemplate.instructions);
       }
+      
+      setTemplates(templates);
     } catch (error) {
       console.error('Error loading templates:', error);
       // Fallback to default template

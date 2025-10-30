@@ -355,6 +355,97 @@ Requirements:
       return [];
     }
   }
+
+  /**
+   * Get course-specific templates
+   * @param courseId Course ID
+   * @returns Array of course-specific templates
+   */
+  async getCourseTemplates(courseId: string): Promise<SavedPromptTemplate[]> {
+    try {
+      const q = query(
+        collection(db, 'coursePromptTemplates'),
+        where('courseId', '==', courseId)
+      );
+      const querySnapshot = await getDocs(q);
+      
+      const templates: SavedPromptTemplate[] = [];
+      querySnapshot.forEach((doc) => {
+        const data = doc.data();
+        templates.push({
+          id: doc.id,
+          name: data.name,
+          description: data.description,
+          instructions: data.instructions,
+          createdAt: data.createdAt?.toDate() || new Date(),
+          updatedAt: data.updatedAt?.toDate() || new Date(),
+          isDefault: data.isDefault || false
+        });
+      });
+
+      // If no course-specific templates exist, return default template
+      if (templates.length === 0) {
+        return [{
+          id: 'default-course',
+          name: 'Default Course Template',
+          description: 'Standard quiz generation for this course',
+          instructions: this.getDefaultTemplate(),
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          isDefault: true
+        }];
+      }
+
+      return templates.sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
+    } catch (error) {
+      console.error('Error getting course templates:', error);
+      return [{
+        id: 'default-course',
+        name: 'Default Course Template',
+        description: 'Standard quiz generation for this course',
+        instructions: this.getDefaultTemplate(),
+        createdAt: new Date(),
+        updatedAt: new Date(),
+        isDefault: true
+      }];
+    }
+  }
+
+  /**
+   * Get active template for a course
+   * @param courseId Course ID
+   * @returns Active template or null if none set
+   */
+  async getActiveCourseTemplate(courseId: string): Promise<SavedPromptTemplate | null> {
+    try {
+      const q = query(
+        collection(db, 'coursePromptTemplates'),
+        where('courseId', '==', courseId),
+        where('isActive', '==', true)
+      );
+      const querySnapshot = await getDocs(q);
+      
+      if (querySnapshot.empty) {
+        return null;
+      }
+
+      const doc = querySnapshot.docs[0];
+      const data = doc.data();
+      
+      return {
+        id: doc.id,
+        name: data.name,
+        description: data.description,
+        instructions: data.instructions,
+        createdAt: data.createdAt?.toDate() || new Date(),
+        updatedAt: data.updatedAt?.toDate() || new Date(),
+        isDefault: data.isDefault || false
+      };
+    } catch (error) {
+      console.error('Error getting active course template:', error);
+      return null;
+    }
+  }
 }
 
 export const promptTemplateService = new PromptTemplateService();

@@ -382,6 +382,7 @@ const AIQuizGenerator = ({ courseId, courseTitle, onQuizComplete, isLecturer = f
             <PromptTemplateSelector
               onTemplateSelect={handleTemplateSelect}
               className="border rounded-lg p-4 bg-gray-50"
+              courseId={courseId}
             />
             
             {/* Custom Template Indicator */}

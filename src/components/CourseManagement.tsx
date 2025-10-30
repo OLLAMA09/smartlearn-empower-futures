@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Plus, Edit, Trash2, Eye, BookOpen, Users, Star, Clock, Video, FileText, File, X, Save, Loader2, GripVertical, ArrowDown, ArrowUp, Bug, Upload, Image } from "lucide-react";
 import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
 import { Course, CourseContent, Quiz, QuizQuestion } from "@/types";
@@ -21,6 +22,8 @@ import "highlight.js/styles/github.css"; // or any highlight.js theme you prefer
 import MdEditor from "react-markdown-editor-lite";
 import "react-markdown-editor-lite/lib/index.css";
 import { CourseContentDebugger } from "./CourseContentDebugger";
+import { PromptTemplateManager } from "./PromptTemplateManager";
+import { CoursePromptManager } from "./CoursePromptManager";
 
 interface CourseManagementProps {
   userRole: 'educator' | 'admin';
@@ -1317,6 +1320,27 @@ const CourseManagement = ({ userRole, onCoursesUpdate }: CourseManagementProps) 
               </Card>
             ))}
           </div>
+          
+          {/* Global Quiz Prompt Template Management */}
+          {/* Global Template Management - Hidden in favor of course-specific management
+          {userRole === 'admin' && (
+            <Card className="mt-8">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Global Quiz Generation Templates
+                </CardTitle>
+                <CardDescription>
+                  Manage global prompt templates that educators can use for AI quiz generation across all courses.
+                  Create and maintain a library of templates for different subjects and quiz types.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <PromptTemplateManager />
+              </CardContent>
+            </Card>
+          )}
+          */}
         </TabsContent>
 
         <TabsContent value="quizzes" className="space-y-4">
@@ -1769,6 +1793,37 @@ const CourseManagement = ({ userRole, onCoursesUpdate }: CourseManagementProps) 
                 ) : null
               )}
             </div>
+          )}
+
+          {/* Quiz Prompt Template Management for Course */}
+          {selectedCourseForContent && (
+            <Card className="mt-8">
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <FileText className="h-5 w-5" />
+                  Quiz Generation Settings - {selectedCourseForContent.title}
+                </CardTitle>
+                <CardDescription>
+                  Configure how AI quizzes are generated for this course.
+                  Create and manage prompt templates to control the style, difficulty, and focus of quiz questions.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Alert className="mb-6 border-blue-200 bg-blue-50">
+                  <FileText className="h-4 w-4" />
+                  <AlertDescription className="text-sm">
+                    <strong>How it works:</strong> Templates control how AI generates quiz questions from your course content. 
+                    The selected template will be used when generating quizzes for this course.
+                    Create subject-specific templates with different difficulty levels and question styles.
+                  </AlertDescription>
+                </Alert>
+                
+                <CoursePromptManager 
+                  courseId={selectedCourseForContent.id}
+                  courseName={selectedCourseForContent.title}
+                />
+              </CardContent>
+            </Card>
           )}
         </TabsContent>
       </Tabs>
