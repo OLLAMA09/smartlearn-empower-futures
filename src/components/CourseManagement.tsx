@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
-import { Plus, Edit, Trash2, Eye, BookOpen, Users, Star, Clock, Video, FileText, File, X, Save, Loader2, GripVertical, ArrowDown, ArrowUp } from "lucide-react";
+import { Plus, Edit, Trash2, Eye, BookOpen, Users, Star, Clock, Video, FileText, File, X, Save, Loader2, GripVertical, ArrowDown, ArrowUp, Bug, Upload, Image } from "lucide-react";
 import { DragDropContext, Droppable, Draggable, DropResult } from 'react-beautiful-dnd';
 import { Course, CourseContent, Quiz, QuizQuestion } from "@/types";
 import { courseService } from "@/services/courseService";
@@ -20,6 +20,7 @@ import rehypeHighlight from "rehype-highlight";
 import "highlight.js/styles/github.css"; // or any highlight.js theme you prefer
 import MdEditor from "react-markdown-editor-lite";
 import "react-markdown-editor-lite/lib/index.css";
+import { CourseContentDebugger } from "./CourseContentDebugger";
 
 interface CourseManagementProps {
   userRole: 'educator' | 'admin';
@@ -39,6 +40,11 @@ const CourseManagement = ({ userRole, onCoursesUpdate }: CourseManagementProps) 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [editingContent, setEditingContent] = useState<CourseContent | null>(null);
+  const [debuggingCourse, setDebuggingCourse] = useState<Course | null>(null);
+  const [thumbnailUploadMode, setThumbnailUploadMode] = useState<'url' | 'upload'>('url');
+  const [thumbnailPreview, setThumbnailPreview] = useState<string>('');
+  const [editThumbnailUploadMode, setEditThumbnailUploadMode] = useState<'url' | 'upload'>('url');
+  const [editThumbnailPreview, setEditThumbnailPreview] = useState<string>('');
   
   const [newContent, setNewContent] = useState<Partial<CourseContent>>({
     title: '',
@@ -185,6 +191,89 @@ const CourseManagement = ({ userRole, onCoursesUpdate }: CourseManagementProps) 
 
     loadCourses();
   }, [currentUser, userRole, onCoursesUpdate]);
+
+  // Set edit thumbnail preview when editing course changes
+  React.useEffect(() => {
+    if (editingCourse?.thumbnail && editingCourse.thumbnail.startsWith('data:image/')) {
+      setEditThumbnailPreview(editingCourse.thumbnail);
+      setEditThumbnailUploadMode('upload');
+    } else {
+      setEditThumbnailPreview('');
+      setEditThumbnailUploadMode('url');
+    }
+  }, [editingCourse]);
+
+  // Convert image file to base64 string
+  const convertImageToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        if (typeof reader.result === 'string') {
+          resolve(reader.result);
+        } else {
+          reject(new Error('Failed to convert image to base64'));
+        }
+      };
+      reader.onerror = () => reject(new Error('Failed to read image file'));
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Handle thumbnail image file selection
+  const handleThumbnailUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select a valid image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image file size must be less than 5MB');
+      return;
+    }
+
+    try {
+      const base64String = await convertImageToBase64(file);
+      setNewCourse({ ...newCourse, thumbnail: base64String });
+      setThumbnailPreview(base64String);
+      toast.success('Image uploaded successfully!');
+    } catch (error) {
+      console.error('Error converting image:', error);
+      toast.error('Failed to upload image');
+    }
+  };
+
+  // Handle edit thumbnail image file selection
+  const handleEditThumbnailUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast.error('Please select a valid image file');
+      return;
+    }
+
+    // Validate file size (max 5MB)
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('Image file size must be less than 5MB');
+      return;
+    }
+
+    try {
+      const base64String = await convertImageToBase64(file);
+      setEditingCourse({ ...editingCourse!, thumbnail: base64String });
+      setEditThumbnailPreview(base64String);
+      toast.success('Image uploaded successfully!');
+    } catch (error) {
+      console.error('Error converting image:', error);
+      toast.error('Failed to upload image');
+    }
+  };
 
   const handleCreateCourse = async () => {
     if (!currentUser) {
@@ -849,33 +938,73 @@ const CourseManagement = ({ userRole, onCoursesUpdate }: CourseManagementProps) 
                       </SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <Label htmlFor="edit-duration">Duration</Label>
+                  <div className="grid gap-2">
+                    <Label htmlFor="duration">Duration</Label>
                     <Input
-                      id="edit-duration"
-                      value={editingCourse?.duration}
-                      onChange={(e) => setEditingCourse({ ...editingCourse, duration: e.target.value })}
+                      id="duration"
+                      value={newCourse.duration}
+                      onChange={(e) => setNewCourse({ ...newCourse, duration: e.target.value })}
                       placeholder="e.g., 2 hours, 5 days"
                     />
                   </div>
-                  <div>
-                    <Label htmlFor="edit-instructor">Instructor</Label>
+                  <div className="grid gap-2">
+                    <Label htmlFor="instructor">Instructor</Label>
                     <Input
-                      id="edit-instructor"
-                      value={editingCourse?.instructor}
-                      onChange={(e) => setEditingCourse({ ...editingCourse, instructor: e.target.value })}
+                      id="instructor"
+                      value={newCourse.instructor}
+                      onChange={(e) => setNewCourse({ ...newCourse, instructor: e.target.value })}
                       placeholder="Instructor name"
                     />
                   </div>
                 </div>
                 <div className="grid gap-2">
-                  <Label htmlFor="thumbnail">Thumbnail URL</Label>
-                  <Input
-                    id="thumbnail"
-                    value={newCourse.thumbnail}
-                    onChange={(e) => setNewCourse({ ...newCourse, thumbnail: e.target.value })}
-                    placeholder="Enter image URL"
-                  />
+                  <Label>Thumbnail</Label>
+                  <Tabs value={thumbnailUploadMode} onValueChange={(value) => setThumbnailUploadMode(value as 'url' | 'upload')}>
+                    <TabsList className="grid w-full grid-cols-2">
+                      <TabsTrigger value="url">URL</TabsTrigger>
+                      <TabsTrigger value="upload">Upload Image</TabsTrigger>
+                    </TabsList>
+                    <TabsContent value="url" className="space-y-2">
+                      <Input
+                        value={newCourse.thumbnail}
+                        onChange={(e) => setNewCourse({ ...newCourse, thumbnail: e.target.value })}
+                        placeholder="Enter image URL (e.g., https://example.com/image.jpg)"
+                      />
+                    </TabsContent>
+                    <TabsContent value="upload" className="space-y-2">
+                      <div className="flex items-center gap-2">
+                        <Input
+                          type="file"
+                          accept="image/*"
+                          onChange={handleThumbnailUpload}
+                          className="hidden"
+                          id="thumbnail-upload"
+                        />
+                        <Label
+                          htmlFor="thumbnail-upload"
+                          className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md cursor-pointer hover:bg-gray-50 transition-colors"
+                        >
+                          <Upload className="h-4 w-4" />
+                          Choose Image
+                        </Label>
+                        <span className="text-sm text-gray-500">
+                          Max 5MB, JPG/PNG/WebP
+                        </span>
+                      </div>
+                      {thumbnailPreview && (
+                        <div className="mt-2">
+                          <Label className="text-sm font-medium">Preview:</Label>
+                          <div className="mt-1 relative w-32 h-20 border border-gray-300 rounded-md overflow-hidden">
+                            <img
+                              src={thumbnailPreview}
+                              alt="Thumbnail preview"
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </TabsContent>
+                  </Tabs>
                 </div>
                 <div className="grid gap-2">
                   <Label htmlFor="status">Status</Label>
@@ -1150,6 +1279,15 @@ const CourseManagement = ({ userRole, onCoursesUpdate }: CourseManagementProps) 
                     >
                       <Edit className="h-4 w-4 mr-1" />
                       Edit
+                    </Button>
+                    
+                    <Button
+                      onClick={() => setDebuggingCourse(course)}
+                      size="sm"
+                      variant="secondary"
+                      title="Debug Course Content for AI Quiz Generation"
+                    >
+                      <Bug className="h-4 w-4" />
                     </Button>
                     
                     <AlertDialog>
@@ -1708,12 +1846,53 @@ const CourseManagement = ({ userRole, onCoursesUpdate }: CourseManagementProps) 
                 </div>
               </div>
               <div className="grid gap-2">
-                <Label htmlFor="edit-thumbnail">Thumbnail URL</Label>
-                <Input
-                  id="edit-thumbnail"
-                  value={editingCourse.thumbnail}
-                  onChange={(e) => setEditingCourse({ ...editingCourse, thumbnail: e.target.value })}
-                />
+                <Label>Thumbnail</Label>
+                <Tabs value={editThumbnailUploadMode} onValueChange={(value) => setEditThumbnailUploadMode(value as 'url' | 'upload')}>
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="url">URL</TabsTrigger>
+                    <TabsTrigger value="upload">Upload Image</TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="url" className="space-y-2">
+                    <Input
+                      value={editingCourse.thumbnail}
+                      onChange={(e) => setEditingCourse({ ...editingCourse, thumbnail: e.target.value })}
+                      placeholder="Enter image URL (e.g., https://example.com/image.jpg)"
+                    />
+                  </TabsContent>
+                  <TabsContent value="upload" className="space-y-2">
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="file"
+                        accept="image/*"
+                        onChange={handleEditThumbnailUpload}
+                        className="hidden"
+                        id="edit-thumbnail-upload"
+                      />
+                      <Label
+                        htmlFor="edit-thumbnail-upload"
+                        className="flex items-center gap-2 px-4 py-2 border border-gray-300 rounded-md cursor-pointer hover:bg-gray-50 transition-colors"
+                      >
+                        <Upload className="h-4 w-4" />
+                        Choose Image
+                      </Label>
+                      <span className="text-sm text-gray-500">
+                        Max 5MB, JPG/PNG/WebP
+                      </span>
+                    </div>
+                    {editThumbnailPreview && (
+                      <div className="mt-2">
+                        <Label className="text-sm font-medium">Preview:</Label>
+                        <div className="mt-1 relative w-32 h-20 border border-gray-300 rounded-md overflow-hidden">
+                          <img
+                            src={editThumbnailPreview}
+                            alt="Thumbnail preview"
+                            className="w-full h-full object-cover"
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </TabsContent>
+                </Tabs>
               </div>
               <div className="grid gap-2">
                 <Label htmlFor="edit-status">Status</Label>
@@ -1739,6 +1918,14 @@ const CourseManagement = ({ userRole, onCoursesUpdate }: CourseManagementProps) 
             </DialogFooter>
           </DialogContent>
         </Dialog>
+      )}
+
+      {/* Course Content Debugger */}
+      {debuggingCourse && (
+        <CourseContentDebugger
+          course={debuggingCourse}
+          onClose={() => setDebuggingCourse(null)}
+        />
       )}
     </div>
   );

@@ -16,6 +16,7 @@ import {
 } from '@/types';
 import { openAIService } from './openAIService';
 import { v4 as uuidv4 } from 'uuid';
+import { analyzeCourseContent, generateContentReport, validateForQuizGeneration } from '@/utils/courseDebugger';
 
 export class QuizService {
   private coursesCollection = 'courses';
@@ -59,28 +60,122 @@ export class QuizService {
         throw new Error('Course not found');
       }
       
-      const courseData = courseDoc.data() as Course;
+      const rawCourseData = courseDoc.data();
+      const courseData = rawCourseData as Course;
+      
+      // Development logging for raw Firebase data
+      if (import.meta.env.MODE === 'development') {
+        console.log(`🔍 Raw Firebase Course Data Keys:`, Object.keys(rawCourseData || {}));
+        console.log(`🔍 Course Title:`, rawCourseData?.title);
+        console.log(`🔍 Course Content Type:`, typeof rawCourseData?.content);
+        console.log(`🔍 Course Content Array Check:`, Array.isArray(rawCourseData?.content));
+        if (rawCourseData?.content) {
+          console.log(`🔍 Course Content Length:`, rawCourseData.content.length);
+        }
+      }
       
       // Enhanced content analysis and formatting
+      console.log(`🎯 Starting quiz generation for course: "${courseData.title}"`);
+      
+      // Use the new debugging utilities
+      if (import.meta.env.MODE === 'development') {
+        console.log('📊 COURSE CONTENT ANALYSIS:');
+        console.log(generateContentReport(courseData));
+      }
+
+      const validation = validateForQuizGeneration(courseData);
+      if (!validation.isValid) {
+        const errorMessage = `Course "${courseData.title}" is not suitable for quiz generation:\n${validation.issues.join('\n')}`;
+        console.error('❌', errorMessage);
+        if (import.meta.env.MODE === 'development') {
+          console.log('📋 Full course analysis:', analyzeCourseContent(courseData));
+        }
+        throw new Error(errorMessage);
+      }
+
+      console.log(`✅ Course content validation passed`);
+      
       const sectionsWithSubtitles = this.analyzeCourseContent(courseData);
+      
+      // Validate sections before formatting
+      if (sectionsWithSubtitles.length === 0) {
+        throw new Error(`No valid content sections found in course "${courseData.title}". Please ensure the course has content sections with substantial text.`);
+      }
+
+      console.log(`✅ Found ${sectionsWithSubtitles.length} valid content sections`);
+
+      // Validate content quality
+      const totalContentLength = sectionsWithSubtitles.reduce((total, section) => section.content.length, 0);
+      console.log(`📏 Total content available: ${totalContentLength} characters`);
+
       const contentForPrompt = this.formatContentForPrompt(sectionsWithSubtitles);
       
-      // Validate that we have sufficient content
+      // Validate formatted content
       if (!contentForPrompt || contentForPrompt.trim().length < 100) {
-        throw new Error(`Insufficient course content for quiz generation. Course "${courseData.title}" needs more detailed content sections to create meaningful questions.`);
+        const errorMsg = `Content formatting failed. Course "${courseData.title}" content could not be properly formatted for AI processing.`;
+        
+        console.error(`❌ ${errorMsg}`);
+        console.log('🔍 Debug - Raw sections:', sectionsWithSubtitles.map(s => ({ 
+          title: s.title, 
+          contentLength: s.content.length 
+        })));
+        
+        throw new Error(errorMsg);
+      }
+
+      console.log(`🔧 Formatted content ready for AI (${contentForPrompt.length} chars)`);
+      console.log('📝 Content preview (first 300 chars):', contentForPrompt.substring(0, 300) + '...');
+      
+      // Additional validation for development
+      if (import.meta.env.MODE === 'development') {
+        console.log('🔍 Full formatted content for AI:', contentForPrompt);
+        console.log(`📊 Content Analysis Results:`, {
+          contentExists: !!courseData.content,
+          contentLength: courseData.content?.length || 0,
+          contentForPromptLength: contentForPrompt?.length || 0,
+          sectionsAnalyzed: sectionsWithSubtitles.length,
+          firstSectionPreview: sectionsWithSubtitles[0] ? {
+            title: sectionsWithSubtitles[0].title,
+            contentLength: sectionsWithSubtitles[0].content?.length || 0,
+            hasContent: !!sectionsWithSubtitles[0].content
+          } : 'No sections found'
+        });
       }
       
       // Development logging to verify content is being used
       if (import.meta.env.MODE === 'development') {
         console.log(`📚 Course Data Retrieved:`, {
           title: courseData.title,
+          description: courseData.description,
           contentSections: courseData.content?.length || 0,
           totalContentLength: courseData.content?.reduce((total, item) => total + (item.content?.length || 0), 0) || 0
         });
-        console.log(`📋 Analyzed Content Sections:`, sectionsWithSubtitles.length);
+        
+        // Log each content section details
+        if (courseData.content && courseData.content.length > 0) {
+          console.log(`� Content Sections Details:`);
+          courseData.content.forEach((section, index) => {
+            console.log(`  Section ${index + 1}: "${section.title}" (${section.content?.length || 0} chars)`);
+            if (section.content) {
+              console.log(`    Preview: ${section.content.substring(0, 100)}...`);
+            } else {
+              console.warn(`    ⚠️ No content in section: ${section.title}`);
+            }
+          });
+        } else {
+          console.warn(`⚠️ No content sections found in courseData.content`);
+          console.log(`Raw courseData structure:`, Object.keys(courseData));
+        }
+        
+        console.log(`�📋 Analyzed Content Sections:`, sectionsWithSubtitles.length);
         console.log(`📝 Content for Prompt Length:`, contentForPrompt.length);
-        console.log(`📄 Content Preview:`, contentForPrompt.substring(0, 300) + "...");
-        console.log(`✅ Content validation passed - sufficient content available for quiz generation`);
+        
+        if (contentForPrompt.length > 0) {
+          console.log(`📄 Content Preview:`, contentForPrompt.substring(0, 300) + "...");
+          console.log(`✅ Content validation passed - sufficient content available for quiz generation`);
+        } else {
+          console.error(`❌ Content for prompt is empty! Check course content structure.`);
+        }
       }
       
       const generatedAt = new Date();
@@ -952,22 +1047,103 @@ Return as JSON array:
    * @param courseData The course data
    * @returns Analyzed content with sections and subtitles
    */
+  /**
+   * Validates the course structure to ensure it has proper content
+   */
+  private validateCourseStructure(courseData: Course): boolean {
+    console.log('🔍 Validating course structure for:', courseData.title);
+    
+    if (!courseData) {
+      console.error('❌ Course data is null or undefined');
+      return false;
+    }
+    
+    if (!courseData.content) {
+      console.error('❌ Course has no content property');
+      console.log('Available course properties:', Object.keys(courseData));
+      return false;
+    }
+    
+    if (!Array.isArray(courseData.content)) {
+      console.error('❌ Course content is not an array');
+      console.log('Content type:', typeof courseData.content);
+      console.log('Content value:', courseData.content);
+      return false;
+    }
+    
+    if (courseData.content.length === 0) {
+      console.error('❌ Course has no content sections');
+      return false;
+    }
+    
+    console.log(`✅ Course has ${courseData.content.length} content sections`);
+    
+    // Validate each section
+    let validSections = 0;
+    for (let i = 0; i < courseData.content.length; i++) {
+      const section = courseData.content[i];
+      console.log(`🔍 Validating section ${i + 1}:`, {
+        title: section?.title,
+        contentLength: section?.content?.length || 0,
+        type: section?.type
+      });
+      
+      if (!section) {
+        console.warn(`⚠️ Section ${i + 1} is null or undefined`);
+        continue;
+      }
+      
+      if (!section.title) {
+        console.warn(`⚠️ Section ${i + 1} has no title`);
+      }
+      
+      if (!section.content || section.content.trim().length === 0) {
+        console.warn(`⚠️ Section ${i + 1} "${section.title || 'Untitled'}" has no content`);
+        continue;
+      }
+      
+      if (section.content.trim().length < 50) {
+        console.warn(`⚠️ Section ${i + 1} "${section.title}" has very short content (${section.content.length} chars)`);
+        continue;
+      }
+      
+      validSections++;
+      console.log(`✅ Section ${i + 1} "${section.title}" validated (${section.content.length} chars)`);
+    }
+    
+    console.log(`📊 Validation result: ${validSections}/${courseData.content.length} sections have valid content`);
+    return validSections > 0;
+  }
+
   private analyzeCourseContent(courseData: Course): Array<{
     title: string;
     content: string;
     subtitles: string[];
     keyWords: string[];
   }> {
-    if (!courseData.content || courseData.content.length === 0) {
-      console.warn(`⚠️ No content sections found in course: ${courseData.title}`);
+    // First validate the course structure
+    if (!this.validateCourseStructure(courseData)) {
+      console.error('❌ Course structure validation failed');
       return [];
     }
 
-    const analyzedSections = courseData.content.map(item => {
-      const content = item.content || '';
+    console.log(`📖 Analyzing ${courseData.content.length} course sections`);
+    
+    const analyzedSections = courseData.content.map((item, index) => {
+      console.log(`🔍 Processing section ${index + 1}: "${item.title}"`);
       
-      if (!content || content.trim().length === 0) {
+      let content = item.content || '';
+      
+      // Clean up the content
+      content = content.trim();
+      
+      if (!content || content.length === 0) {
         console.warn(`⚠️ Empty content in section: ${item.title}`);
+        return null;
+      }
+
+      if (content.length < 50) {
+        console.warn(`⚠️ Section "${item.title}" has very short content (${content.length} chars)`);
         return null;
       }
       
@@ -981,9 +1157,7 @@ Return as JSON array:
       const keyWordMatches = content.match(/\b[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\b/g) || [];
       const keyWords = [...new Set(keyWordMatches)].slice(0, 10); // Top 10 unique key terms
 
-      if (import.meta.env.MODE === 'development') {
-        console.log(`📖 Section "${item.title}": ${content.length} chars, ${subtitles.length} subtitles, ${keyWords.length} key terms`);
-      }
+      console.log(`✅ Section "${item.title}": ${content.length} chars, ${subtitles.length} subtitles, ${keyWords.length} key terms`);
 
       return {
         title: item.title,
@@ -993,6 +1167,7 @@ Return as JSON array:
       };
     }).filter(item => item !== null && item.content.length > 0);
 
+    console.log(`📄 Final analysis: ${analyzedSections.length} valid sections processed`);
     return analyzedSections as Array<{
       title: string;
       content: string;
@@ -1012,11 +1187,23 @@ Return as JSON array:
     subtitles: string[];
     keyWords: string[];
   }>): string {
-    const maxTotalLength = 3000; // Reduced for Netlify free plan 10s limit
+    if (!sectionsWithSubtitles || sectionsWithSubtitles.length === 0) {
+      console.warn('⚠️ No sections provided to formatContentForPrompt');
+      return '';
+    }
+
+    const maxTotalLength = 5000; // Increased to ensure we get enough content
     let formattedContent = '';
     let currentLength = 0;
 
+    console.log(`📝 Formatting ${sectionsWithSubtitles.length} sections for AI prompt`);
+
     for (const section of sectionsWithSubtitles) {
+      if (!section.content || section.content.trim().length === 0) {
+        console.warn(`⚠️ Empty content in section: ${section.title}`);
+        continue;
+      }
+
       const sectionHeader = `\n## SECTION: ${section.title}\n`;
       const subtitlesInfo = section.subtitles.length > 0 
         ? `**Key Subtitles:** ${section.subtitles.join(', ')}\n`
@@ -1025,28 +1212,62 @@ Return as JSON array:
         ? `**Key Terms:** ${section.keyWords.join(', ')}\n`
         : '';
       
-      // Truncate content if necessary but prioritize beginning and subtitles
-      let sectionContent = section.content;
+      // Clean and process the content
+      let sectionContent = section.content.trim();
+      
+      // Remove excessive markdown formatting but keep structure
+      sectionContent = sectionContent
+        .replace(/```[\s\S]*?```/g, '[Code Block]') // Replace code blocks
+        .replace(/!\[.*?\]\(.*?\)/g, '[Image]') // Replace images
+        .replace(/\[([^\]]+)\]\([^\)]+\)/g, '$1') // Convert links to plain text
+        .replace(/#{4,}/g, '###') // Limit header depth
+        .replace(/\*{3,}/g, '**') // Normalize bold formatting
+        .replace(/\n{3,}/g, '\n\n') // Normalize line breaks
+        .trim();
+
       const maxSectionLength = Math.floor(maxTotalLength / sectionsWithSubtitles.length);
       
       if (sectionContent.length > maxSectionLength) {
-        const halfPoint = Math.floor(maxSectionLength / 2);
-        sectionContent = sectionContent.substring(0, halfPoint) + 
-                        "\n[... content continues ...]\n" + 
-                        sectionContent.substring(sectionContent.length - halfPoint);
+        // Smart truncation: try to keep complete paragraphs
+        const paragraphs = sectionContent.split('\n\n');
+        let truncatedContent = '';
+        let usedLength = 0;
+        
+        for (const paragraph of paragraphs) {
+          if (usedLength + paragraph.length < maxSectionLength * 0.8) {
+            truncatedContent += paragraph + '\n\n';
+            usedLength += paragraph.length;
+          } else {
+            break;
+          }
+        }
+        
+        if (truncatedContent.length < maxSectionLength * 0.5) {
+          // If smart truncation didn't work well, use simple truncation
+          const halfPoint = Math.floor(maxSectionLength / 2);
+          sectionContent = sectionContent.substring(0, halfPoint) + 
+                          "\n\n[... content continues ...]\n\n" + 
+                          sectionContent.substring(sectionContent.length - halfPoint);
+        } else {
+          sectionContent = truncatedContent + "\n[... section continues ...]";
+        }
       }
       
       const fullSection = sectionHeader + subtitlesInfo + keyWordsInfo + 
                          `**Content:**\n${sectionContent}\n`;
       
       if (currentLength + fullSection.length > maxTotalLength) {
+        console.log(`📏 Content length limit reached at section: ${section.title}`);
         break;
       }
       
       formattedContent += fullSection;
       currentLength += fullSection.length;
+      
+      console.log(`✅ Added section "${section.title}" (${sectionContent.length} chars)`);
     }
 
+    console.log(`📄 Final formatted content length: ${formattedContent.length} chars`);
     return formattedContent;
   }
 
